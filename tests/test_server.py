@@ -5,7 +5,9 @@ from unittest.mock import patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from aichat_history.backends.claude_code import ClaudeCodeProvider
 from aichat_history.backends.cursor import CursorProvider
+from aichat_history.backends.opencode import OpenCodeProvider
 from aichat_history.server import app, _providers
 
 
@@ -119,3 +121,52 @@ async def test_index_page():
             resp = await client.get("/")
             assert resp.status_code == 200
             assert "aichat-history" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_merged_sessions_all_backends(
+    tmp_cursor_workspace, tmp_cursor_global, tmp_claude_code_dir, tmp_opencode_dir
+):
+    """Test that sessions from all 3 backends are merged correctly."""
+    cursor = CursorProvider()
+    cursor.get_base_path = lambda: tmp_cursor_workspace
+    cursor.is_available = lambda: True
+
+    claude = ClaudeCodeProvider()
+    claude.get_base_path = lambda: tmp_claude_code_dir
+    claude.is_available = lambda: True
+
+    opencode = OpenCodeProvider()
+    opencode.get_base_path = lambda: tmp_opencode_dir
+    opencode.is_available = lambda: True
+
+    all_providers = [cursor, claude, opencode]
+
+    with (
+        patch("aichat_history.server.get_available_providers", return_value=all_providers),
+        patch("aichat_history.backends.cursor.get_cursor_global_path", return_value=tmp_cursor_global),
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            # Check sources
+            resp = await client.get("/api/sources")
+            sources = resp.json()
+            assert "cursor" in sources
+            assert "claude_code" in sources
+            assert "opencode" in sources
+
+            # Check merged sessions
+            resp = await client.get("/api/sessions")
+            data = resp.json()
+            session_sources = {s["source"] for s in data["sessions"]}
+            assert "cursor" in session_sources
+            assert "claude_code" in session_sources
+            assert "opencode" in session_sources
+            # 2 cursor workspace + 1 cursor global + 2 claude + 1 opencode = 6
+            assert data["total"] == 6
+
+            # Filter by source
+            resp = await client.get("/api/sessions?source=claude_code")
+            data = resp.json()
+            assert all(s["source"] == "claude_code" for s in data["sessions"])
+            assert data["total"] == 2
