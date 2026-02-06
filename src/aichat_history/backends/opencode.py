@@ -2,6 +2,11 @@
 
 Reads chat data from ~/.local/share/opencode/storage/ directory.
 Data is organized as: session/ -> message/ -> part/ hierarchy.
+
+Supports two storage versions:
+- v1.0 (older): Messages contain only metadata; no part/ directories.
+  Content is limited to summary.title on user messages.
+- v1.1+ (newer): Full content stored in part/ directories as prt_*.json files.
 """
 
 import json
@@ -40,7 +45,6 @@ class OpenCodeProvider(ChatProvider):
             if not project_dir.is_dir():
                 continue
 
-            # Get display path from session files
             display_path = self._get_project_display_path(project_dir)
             if display_path in seen_paths:
                 continue
@@ -152,7 +156,12 @@ class OpenCodeProvider(ChatProvider):
         )
 
     def _parse_message_file(self, msg_file: Path, base: Path) -> Message | None:
-        """Parse a message JSON file and assemble its parts."""
+        """Parse a message JSON file and assemble its parts.
+
+        Handles two storage versions:
+        - v1.1+: Content in part/ directory (prt_*.json files)
+        - v1.0: No parts; only summary.title available for user messages
+        """
         try:
             data = json.loads(msg_file.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as e:
@@ -164,7 +173,7 @@ class OpenCodeProvider(ChatProvider):
         time_data = data.get("time", {})
         timestamp = _ms_to_datetime(time_data.get("created"))
 
-        # Load parts
+        # Try loading content from parts (v1.1+ format)
         content_parts = []
         message_type = "text"
         metadata = {}
@@ -180,22 +189,63 @@ class OpenCodeProvider(ChatProvider):
                 part_type = part.get("type", "text")
 
                 if part_type == "text":
-                    content_parts.append(part.get("text", ""))
+                    text = part.get("text", "")
+                    if text:
+                        content_parts.append(text)
                 elif part_type == "tool":
-                    tool_name = part.get("name", "unknown")
-                    tool_input = part.get("input", {})
-                    content_parts.append(f"[Tool: {tool_name}]")
+                    # v1.1 tool format: {"type":"tool", "tool":"grep", "state":{"input":{}, "output":"..."}}
+                    tool_name = part.get("tool", "unknown")
+                    state = part.get("state", {})
+                    tool_input = state.get("input", {})
+                    tool_output = state.get("output", "")
+                    status = state.get("status", "")
+                    summary = f"[Tool: {tool_name}]"
+                    if tool_input:
+                        # Show a compact input summary
+                        input_summary = ", ".join(
+                            f"{k}={v}" for k, v in tool_input.items()
+                            if isinstance(v, (str, int, bool)) and str(v)
+                        )
+                        if input_summary:
+                            summary = f"[Tool: {tool_name} ({input_summary})]"
+                    content_parts.append(summary)
+                    if tool_output:
+                        content_parts.append(f"```\n{tool_output}\n```")
                     message_type = "tool_call"
                     metadata["tool_name"] = tool_name
                 elif part_type == "patch":
                     content_parts.append("[Patch/Edit]")
                     message_type = "diff"
+                elif part_type == "step-start":
+                    # Lifecycle marker, skip
+                    continue
                 else:
+                    # Unknown type — try to extract any text
                     text = part.get("text", "")
                     if text:
                         content_parts.append(text)
 
         content = "\n".join(content_parts) if content_parts else ""
+
+        # Fallback for v1.0: use summary.title if no parts found
+        if not content:
+            summary = data.get("summary", {})
+            if not isinstance(summary, dict):
+                summary = {}
+            title = summary.get("title", "")
+            if title:
+                content = title
+            elif role == "assistant":
+                # For assistant messages with no content, show mode/finish info
+                mode = data.get("mode", "")
+                finish = data.get("finish", "")
+                if mode or finish:
+                    parts_info = []
+                    if mode:
+                        parts_info.append(f"mode: {mode}")
+                    if finish:
+                        parts_info.append(f"finish: {finish}")
+                    content = f"[{', '.join(parts_info)}]"
 
         return Message(
             role=role,

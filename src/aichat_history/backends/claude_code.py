@@ -2,6 +2,14 @@
 
 Reads chat data from ~/.claude/projects/ directory structure.
 Each project has a sessions-index.json and per-session .jsonl files.
+
+JSONL entry types:
+- "user" or "human": User messages. Content can be a string or array of blocks.
+  May also contain tool_result blocks (responses from tool execution).
+- "assistant": AI responses. Content is an array of text and/or tool_use blocks.
+  A single JSONL line can produce multiple messages (text + tool calls).
+- "file-history-snapshot": Skipped.
+- "progress", "system": Skipped (metadata only).
 """
 
 import json
@@ -112,7 +120,6 @@ class ClaudeCodeProvider(ChatProvider):
         """Read sessions from a project's sessions-index.json."""
         index_path = project_dir / "sessions-index.json"
         if not index_path.exists():
-            # Fall back to scanning for .jsonl files
             return self._scan_jsonl_sessions(project_dir)
 
         try:
@@ -163,25 +170,24 @@ class ClaudeCodeProvider(ChatProvider):
 
         for jsonl_file in project_dir.glob("*.jsonl"):
             session_id = jsonl_file.stem
-            # Count lines for message estimate
             try:
                 line_count = sum(1 for _ in jsonl_file.open(encoding="utf-8"))
             except OSError:
                 line_count = 0
 
-            # Read first line for title
             title = "Untitled"
             try:
                 with jsonl_file.open(encoding="utf-8") as f:
-                    first_line = f.readline().strip()
-                    if first_line:
-                        entry = json.loads(first_line)
-                        if entry.get("type") == "human":
-                            content = entry.get("message", {}).get("content", [])
-                            for block in content:
-                                if isinstance(block, dict) and block.get("type") == "text":
-                                    title = block["text"][:80]
-                                    break
+                    for raw_line in f:
+                        raw_line = raw_line.strip()
+                        if not raw_line:
+                            continue
+                        entry = json.loads(raw_line)
+                        if entry.get("type") in ("human", "user"):
+                            text = self._extract_user_text(entry)
+                            if text:
+                                title = text[:80]
+                                break
             except (json.JSONDecodeError, OSError):
                 pass
 
@@ -197,7 +203,10 @@ class ClaudeCodeProvider(ChatProvider):
         return sessions
 
     def _parse_jsonl(self, path: Path) -> list[Message]:
-        """Parse a session's JSONL file into messages."""
+        """Parse a session's JSONL file into messages.
+
+        Each JSONL line can produce zero, one, or multiple Message objects.
+        """
         messages = []
 
         try:
@@ -212,80 +221,189 @@ class ClaudeCodeProvider(ChatProvider):
                         logger.debug("Bad JSON at %s:%d: %s", path, line_num, e)
                         continue
 
-                    msg = self._entry_to_message(entry)
-                    if msg:
-                        messages.append(msg)
+                    messages.extend(self._entry_to_messages(entry))
         except OSError as e:
             logger.warning("Failed to read JSONL %s: %s", path, e)
 
         return messages
 
-    def _entry_to_message(self, entry: dict) -> Message | None:
-        """Convert a JSONL entry to a Message, or None if it should be skipped."""
+    def _entry_to_messages(self, entry: dict) -> list[Message]:
+        """Convert a JSONL entry to a list of Messages.
+
+        Returns an empty list for entries that should be skipped.
+        A single entry can produce multiple messages (e.g. assistant text + tool calls).
+        """
         entry_type = entry.get("type", "")
         timestamp = _parse_iso(entry.get("timestamp"))
 
-        if entry_type == "file-history-snapshot":
-            return None  # Skip file snapshots
+        # Skip non-message entry types
+        if entry_type in ("file-history-snapshot", "progress", "system"):
+            return []
 
-        if entry_type == "human":
-            text = self._extract_text(entry.get("message", {}))
-            if text:
-                return Message(
+        if entry_type in ("human", "user"):
+            return self._parse_user_entry(entry, timestamp)
+
+        if entry_type == "assistant":
+            return self._parse_assistant_entry(entry, timestamp)
+
+        return []
+
+    def _parse_user_entry(self, entry: dict, timestamp: datetime | None) -> list[Message]:
+        """Parse a user/human JSONL entry.
+
+        User entries can contain:
+        - Plain text (user prompts)
+        - tool_result blocks (responses from tool execution)
+        - A mix of both
+        """
+        msg_data = entry.get("message", {})
+        content = msg_data.get("content", [])
+
+        # Simple string content
+        if isinstance(content, str):
+            if content.strip():
+                return [Message(
                     role="user",
-                    content=text,
+                    content=content,
                     timestamp=timestamp,
                     message_type="text",
-                )
+                )]
+            return []
 
-        elif entry_type == "assistant":
-            msg_data = entry.get("message", {})
-            content_blocks = msg_data.get("content", [])
+        messages = []
+        text_parts = []
 
-            # Separate text and tool_use blocks
-            text_parts = []
-            tool_messages = []
+        for block in content:
+            if not isinstance(block, dict):
+                if isinstance(block, str) and block.strip():
+                    text_parts.append(block)
+                continue
 
-            for block in content_blocks:
-                if not isinstance(block, dict):
-                    continue
-                if block.get("type") == "text":
-                    text_parts.append(block.get("text", ""))
-                elif block.get("type") == "tool_use":
-                    tool_name = block.get("name", "unknown")
-                    tool_input = block.get("input", {})
-                    file_path = tool_input.get("file_path", "")
-                    summary = tool_name
-                    if file_path:
-                        summary += f": {file_path}"
-                    tool_messages.append(Message(
-                        role="tool",
-                        content=json.dumps(tool_input, indent=2) if tool_input else summary,
+            block_type = block.get("type", "")
+
+            if block_type == "text":
+                text = block.get("text", "")
+                if text.strip():
+                    text_parts.append(text)
+
+            elif block_type == "tool_result":
+                # Tool execution result — show as tool message
+                tool_content = block.get("content", "")
+                if isinstance(tool_content, list):
+                    # Content can be array of blocks
+                    parts = []
+                    for sub in tool_content:
+                        if isinstance(sub, dict) and sub.get("type") == "text":
+                            parts.append(sub.get("text", ""))
+                        elif isinstance(sub, str):
+                            parts.append(sub)
+                    tool_content = "\n".join(parts)
+
+                is_error = block.get("is_error", False)
+                messages.append(Message(
+                    role="tool" if not is_error else "error",
+                    content=str(tool_content) if tool_content else "(empty result)",
+                    timestamp=timestamp,
+                    message_type="tool_result",
+                    metadata={"tool_use_id": block.get("tool_use_id", "")},
+                ))
+
+        # Emit text parts as user message (if any non-tool-result text)
+        if text_parts:
+            messages.insert(0, Message(
+                role="user",
+                content="\n".join(text_parts),
+                timestamp=timestamp,
+                message_type="text",
+            ))
+
+        return messages
+
+    def _parse_assistant_entry(self, entry: dict, timestamp: datetime | None) -> list[Message]:
+        """Parse an assistant JSONL entry.
+
+        Assistant entries have content arrays with text and/or tool_use blocks.
+        All blocks from a single entry are returned as separate messages.
+        """
+        msg_data = entry.get("message", {})
+        content_blocks = msg_data.get("content", [])
+
+        if isinstance(content_blocks, str):
+            if content_blocks.strip():
+                return [Message(
+                    role="assistant",
+                    content=content_blocks,
+                    timestamp=timestamp,
+                    message_type="text",
+                )]
+            return []
+
+        messages = []
+        text_parts = []
+
+        for block in content_blocks:
+            if not isinstance(block, dict):
+                continue
+
+            block_type = block.get("type", "")
+
+            if block_type == "text":
+                text = block.get("text", "")
+                if text.strip():
+                    text_parts.append(text)
+
+            elif block_type == "tool_use":
+                tool_name = block.get("name", "unknown")
+                tool_input = block.get("input", {})
+                file_path = tool_input.get("file_path", tool_input.get("path", ""))
+                command = tool_input.get("command", "")
+
+                # Build a readable summary
+                summary_parts = [tool_name]
+                if file_path:
+                    summary_parts.append(file_path)
+                elif command:
+                    cmd_short = command[:100] + ("..." if len(command) > 100 else "")
+                    summary_parts.append(cmd_short)
+
+                content = ": ".join(summary_parts)
+
+                messages.append(Message(
+                    role="tool",
+                    content=content,
+                    timestamp=timestamp,
+                    message_type="tool_call",
+                    metadata={
+                        "tool_name": tool_name,
+                        "file_path": file_path,
+                        "tool_use_id": block.get("id", ""),
+                    },
+                ))
+
+            elif block_type == "thinking":
+                text = block.get("thinking", "")
+                if text.strip():
+                    messages.append(Message(
+                        role="thinking",
+                        content=text,
                         timestamp=timestamp,
-                        message_type="tool_call",
-                        metadata={"tool_name": tool_name, "file_path": file_path},
+                        message_type="thinking",
                     ))
 
-            messages = []
-            if text_parts:
-                messages.append(Message(
-                    role="assistant",
-                    content="\n".join(text_parts),
-                    timestamp=timestamp,
-                    message_type="text",
-                ))
-            messages.extend(tool_messages)
+        # Insert text message at the beginning (before tool calls)
+        if text_parts:
+            messages.insert(0, Message(
+                role="assistant",
+                content="\n".join(text_parts),
+                timestamp=timestamp,
+                message_type="text",
+            ))
 
-            # Return first message or None; caller handles via _parse_jsonl
-            # Actually we need to return all messages. Restructure: return a list.
-            # For now, return first text message or first tool message.
-            if messages:
-                return messages[0]
+        return messages
 
-        return None
-
-    def _extract_text(self, msg_data: dict) -> str:
-        """Extract text content from a message's content array."""
+    def _extract_user_text(self, entry: dict) -> str:
+        """Extract plain text content from a user entry (ignoring tool_results)."""
+        msg_data = entry.get("message", {})
         content = msg_data.get("content", [])
         if isinstance(content, str):
             return content
@@ -304,7 +422,6 @@ def _parse_iso(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        # Handle Z suffix
         if value.endswith("Z"):
             value = value[:-1] + "+00:00"
         return datetime.fromisoformat(value)

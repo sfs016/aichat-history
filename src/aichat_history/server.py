@@ -82,7 +82,7 @@ async def get_sources():
 async def get_sessions(
     source: str | None = Query(None, description="Filter by source"),
     search: str | None = Query(None, description="Search in titles"),
-    sort: str = Query("newest", description="Sort: newest, messages, project"),
+    sort: str = Query("messages", description="Sort: newest, messages, project"),
     project: str | None = Query(None, description="Filter by project path"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
