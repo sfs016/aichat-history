@@ -236,16 +236,16 @@ class OpenCodeProvider(ChatProvider):
             if title:
                 content = title
             elif role == "assistant":
-                # For assistant messages with no content, show mode/finish info
-                mode = data.get("mode", "")
-                finish = data.get("finish", "")
-                if mode or finish:
-                    parts_info = []
-                    if mode:
-                        parts_info.append(f"mode: {mode}")
-                    if finish:
-                        parts_info.append(f"finish: {finish}")
-                    content = f"[{', '.join(parts_info)}]"
+                # v1.0 assistant messages have no content on disk (never persisted).
+                # Show a clear notice instead of raw metadata.
+                content = (
+                    "*Content not available — this session uses an older OpenCode "
+                    "storage format (v1.0) that did not save message text to disk.*"
+                )
+            elif role == "user":
+                content = (
+                    "*Content not available — older OpenCode storage format (v1.0).*"
+                )
 
         return Message(
             role=role,

@@ -212,6 +212,28 @@ def tmp_claude_code_dir(tmp_path):
             "type": "progress",
             "data": {"type": "hook_progress"},
         }),
+        # 10. Summary entry (should be skipped)
+        json.dumps({
+            "type": "summary",
+            "summary": "Refactored auth module into separate files",
+        }),
+        # 11. Queue-operation entry (should be skipped)
+        json.dumps({
+            "type": "queue-operation",
+            "operation": "enqueue",
+        }),
+        # 12. Tool result with image block
+        json.dumps({
+            "type": "user",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "toolu_003", "content": [
+                    {"type": "text", "text": "Command output:\nDirectory created"},
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="}},
+                ], "is_error": False},
+            ]},
+            "timestamp": "2025-01-20T10:05:31Z",
+            "uuid": "uuid-008",
+        }),
     ]
     (project_dir / "session-001.jsonl").write_text("\n".join(lines), encoding="utf-8")
 

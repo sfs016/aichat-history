@@ -237,7 +237,10 @@ class ClaudeCodeProvider(ChatProvider):
         timestamp = _parse_iso(entry.get("timestamp"))
 
         # Skip non-message entry types
-        if entry_type in ("file-history-snapshot", "progress", "system"):
+        if entry_type in (
+            "file-history-snapshot", "progress", "system",
+            "summary", "queue-operation",
+        ):
             return []
 
         if entry_type in ("human", "user"):
@@ -290,11 +293,20 @@ class ClaudeCodeProvider(ChatProvider):
                 # Tool execution result — show as tool message
                 tool_content = block.get("content", "")
                 if isinstance(tool_content, list):
-                    # Content can be array of blocks
+                    # Content can be array of blocks (text, image, etc.)
                     parts = []
                     for sub in tool_content:
-                        if isinstance(sub, dict) and sub.get("type") == "text":
-                            parts.append(sub.get("text", ""))
+                        if isinstance(sub, dict):
+                            sub_type = sub.get("type", "")
+                            if sub_type == "text":
+                                parts.append(sub.get("text", ""))
+                            elif sub_type == "image":
+                                parts.append("[Image]")
+                            else:
+                                # Unknown block type — try text field
+                                text = sub.get("text", "")
+                                if text:
+                                    parts.append(text)
                         elif isinstance(sub, str):
                             parts.append(sub)
                     tool_content = "\n".join(parts)

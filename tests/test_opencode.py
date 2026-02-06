@@ -120,15 +120,16 @@ class TestOpenCodeV1Provider:
             assert user_msg.role == "user"
             assert "login page" in user_msg.content.lower()
 
-    def test_v1_assistant_message_shows_metadata(self, tmp_opencode_v1_dir):
-        """v1.0 assistant messages should show mode/finish metadata."""
+    def test_v1_assistant_message_shows_unavailable_notice(self, tmp_opencode_v1_dir):
+        """v1.0 assistant messages should show a clear 'content unavailable' notice."""
         provider = OpenCodeProvider()
         with patch.object(provider, "get_base_path", return_value=tmp_opencode_v1_dir):
             messages = provider.get_session_messages("opencode:ses_old_001")
             asst_msg = messages[1]
             assert asst_msg.role == "assistant"
-            # Should show mode/finish info since no content available
-            assert "code" in asst_msg.content.lower() or "stop" in asst_msg.content.lower()
+            # Should show clear notice about v1.0 limitation
+            assert "not available" in asst_msg.content.lower()
+            assert "v1.0" in asst_msg.content
 
     def test_v1_messages_not_empty(self, tmp_opencode_v1_dir):
         """No message should have empty content in v1.0 format."""

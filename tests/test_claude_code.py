@@ -157,8 +157,37 @@ class TestClaudeCodeProvider:
             # Line 7: user text -> 1 msg
             # Line 8: tool_use only -> 1 msg
             # Line 9: progress -> skipped
-            # Total: 10 messages
-            assert len(messages) == 10
+            # Line 10: summary -> skipped
+            # Line 11: queue-operation -> skipped
+            # Line 12: tool_result with image -> 1 msg
+            # Total: 11 messages
+            assert len(messages) == 11
+
+    def test_summary_and_queue_entries_skipped(self, tmp_claude_code_dir):
+        """summary and queue-operation entries should be skipped."""
+        provider = ClaudeCodeProvider()
+        with patch.object(provider, "get_base_path", return_value=tmp_claude_code_dir):
+            messages = provider.get_session_messages(
+                "claude:-Users-testuser-dev-myapp:session-001"
+            )
+            for m in messages:
+                assert "Refactored auth module into separate" not in m.content
+                assert "enqueue" not in m.content
+
+    def test_tool_result_with_image_block(self, tmp_claude_code_dir):
+        """Tool results with image blocks should show [Image] placeholder."""
+        provider = ClaudeCodeProvider()
+        with patch.object(provider, "get_base_path", return_value=tmp_claude_code_dir):
+            messages = provider.get_session_messages(
+                "claude:-Users-testuser-dev-myapp:session-001"
+            )
+            # Last message is the tool result with image
+            img_msg = messages[-1]
+            assert img_msg.message_type == "tool_result"
+            assert "Directory created" in img_msg.content
+            assert "[Image]" in img_msg.content
+            # Should NOT contain base64 data
+            assert "iVBORw0KGgo" not in img_msg.content
 
     def test_get_session_messages_invalid_id(self, tmp_claude_code_dir):
         provider = ClaudeCodeProvider()
