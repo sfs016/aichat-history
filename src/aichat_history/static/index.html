@@ -18,27 +18,76 @@
   </script>
   <style>
     [v-cloak] { display: none; }
-    .msg-content pre { margin: 0.5rem 0; border-radius: 0.375rem; overflow-x: auto; }
-    .msg-content pre code { display: block; padding: 1rem; font-size: 0.85rem; }
-    .msg-content code { font-size: 0.85rem; padding: 0.1rem 0.3rem; border-radius: 0.25rem; }
-    .msg-content p { margin: 0.4rem 0; }
+
+    /* Markdown content styles */
+    .msg-content pre { margin: 0.5rem 0; border-radius: 0.375rem; overflow-x: auto; position: relative; }
+    .msg-content pre code { display: block; padding: 1rem; font-size: 0.85rem; line-height: 1.5; }
+    .msg-content code:not(pre code) { font-size: 0.85rem; padding: 0.15rem 0.4rem; border-radius: 0.25rem; background: rgba(0,0,0,0.06); }
+    .dark .msg-content code:not(pre code) { background: rgba(255,255,255,0.1); }
+    .msg-content p { margin: 0.4rem 0; line-height: 1.6; }
     .msg-content ul, .msg-content ol { margin: 0.4rem 0; padding-left: 1.5rem; }
     .msg-content ul { list-style-type: disc; }
     .msg-content ol { list-style-type: decimal; }
-    .msg-content h1, .msg-content h2, .msg-content h3 { font-weight: 600; margin: 0.6rem 0 0.3rem; }
+    .msg-content li { margin: 0.2rem 0; }
+    .msg-content h1 { font-size: 1.25rem; font-weight: 700; margin: 0.8rem 0 0.3rem; }
+    .msg-content h2 { font-size: 1.1rem; font-weight: 600; margin: 0.6rem 0 0.3rem; }
+    .msg-content h3 { font-size: 1rem; font-weight: 600; margin: 0.5rem 0 0.2rem; }
     .msg-content blockquote { border-left: 3px solid #6b7280; padding-left: 0.75rem; margin: 0.4rem 0; opacity: 0.85; }
+    .msg-content a { color: #3b82f6; text-decoration: underline; }
+    .msg-content table { border-collapse: collapse; margin: 0.5rem 0; width: 100%; }
+    .msg-content th, .msg-content td { border: 1px solid #d1d5db; padding: 0.3rem 0.6rem; text-align: left; font-size: 0.85rem; }
+    .dark .msg-content th, .dark .msg-content td { border-color: #4b5563; }
+    .msg-content th { background: rgba(0,0,0,0.04); font-weight: 600; }
+    .dark .msg-content th { background: rgba(255,255,255,0.05); }
+    .msg-content hr { margin: 0.5rem 0; border-color: #e5e7eb; }
+    .dark .msg-content hr { border-color: #374151; }
+
+    /* Copy button on code blocks */
+    .code-wrapper { position: relative; }
+    .copy-btn {
+      position: absolute; top: 0.4rem; right: 0.4rem;
+      padding: 0.2rem 0.5rem; font-size: 0.7rem;
+      background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 0.25rem; cursor: pointer; color: #9ca3af;
+      opacity: 0; transition: opacity 0.15s;
+    }
+    .code-wrapper:hover .copy-btn { opacity: 1; }
+    .copy-btn:hover { background: rgba(255,255,255,0.25); color: #e5e7eb; }
+    .copy-btn.copied { color: #34d399; }
+
+    /* Collapsible */
     .collapsible-header { cursor: pointer; user-select: none; }
     .collapsible-header:hover { opacity: 0.8; }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #9ca3af; border-radius: 3px; }
+    .dark ::-webkit-scrollbar-thumb { background: #4b5563; }
+
+    /* Source badge labels */
+    .source-label-cursor { display: inline; }
+    .source-label-cursor::after { content: 'cursor'; }
+    .source-label-claude_code { display: inline; }
+    .source-label-claude_code::after { content: 'claude'; }
+    .source-label-opencode { display: inline; }
+    .source-label-opencode::after { content: 'opencode'; }
   </style>
 </head>
 <body class="h-full bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 transition-colors">
 <div id="app" v-cloak class="h-full flex flex-col">
   <!-- Header -->
   <header class="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
-    <h1 class="text-lg font-bold tracking-tight">aichat-history</h1>
-    <div class="flex items-center gap-3">
-      <button @click="toggleDark" class="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-sm" :title="dark ? 'Light mode' : 'Dark mode'">
-        {{ dark ? '\u2600\uFE0F' : '\uD83C\uDF19' }}
+    <div class="flex items-center gap-2">
+      <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/></svg>
+      <h1 class="text-lg font-bold tracking-tight">aichat-history</h1>
+      <span class="text-xs text-gray-400 hidden sm:inline">unified AI chat viewer</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span v-if="sessions.length" class="text-xs text-gray-400">{{ sessions.length }} sessions</span>
+      <button @click="toggleDark" class="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-sm transition-colors" :title="dark ? 'Light mode' : 'Dark mode'">
+        <template v-if="dark"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/></svg></template>
+        <template v-else><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg></template>
       </button>
     </div>
   </header>
@@ -50,18 +99,21 @@
       <div class="flex border-b border-gray-200 dark:border-gray-700 text-sm">
         <button v-for="tab in sourceTabs" :key="tab.value"
           @click="sourceFilter = tab.value; loadSessions()"
-          :class="['flex-1 py-2 px-1 text-center transition-colors', sourceFilter === tab.value ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-400']">
+          :class="['flex-1 py-2 px-1 text-center transition-colors whitespace-nowrap text-xs sm:text-sm', sourceFilter === tab.value ? 'border-b-2 border-blue-500 text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-400']">
           {{ tab.label }}
         </button>
       </div>
 
       <!-- Search -->
       <div class="p-2">
-        <input v-model="searchQuery" @input="debounceSearch" type="text" placeholder="Search sessions..."
-          class="w-full px-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+        <div class="relative">
+          <svg class="absolute left-2.5 top-2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <input v-model="searchQuery" @input="debounceSearch" type="text" placeholder="Search sessions..."
+            class="w-full pl-8 pr-3 py-1.5 text-sm rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+        </div>
       </div>
 
-      <!-- Sort -->
+      <!-- Sort + filter -->
       <div class="px-2 pb-2 flex gap-2">
         <select v-model="sortBy" @change="loadSessions()"
           class="flex-1 text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700">
@@ -78,51 +130,76 @@
 
       <!-- Session list -->
       <div class="flex-1 overflow-y-auto">
-        <div v-if="loading" class="p-4 text-center text-sm text-gray-500">Loading...</div>
-        <div v-else-if="sessions.length === 0" class="p-4 text-center text-sm text-gray-500">
+        <div v-if="loading" class="p-8 text-center">
+          <div class="inline-block animate-spin rounded-full h-6 w-6 border-2 border-gray-300 border-t-blue-500"></div>
+          <p class="mt-2 text-sm text-gray-500">Loading sessions...</p>
+        </div>
+        <div v-else-if="sessions.length === 0" class="p-6 text-center text-sm text-gray-500">
           <template v-if="sources.length === 0">
-            No AI IDE data found.<br />
-            <span class="text-xs">Checked Cursor, Claude Code, and OpenCode storage paths.</span>
+            <svg class="w-10 h-10 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <p class="font-medium">No AI IDE data found</p>
+            <p class="text-xs mt-1 text-gray-400">Checked Cursor, Claude Code, and OpenCode storage paths.</p>
           </template>
-          <template v-else>No sessions found.</template>
+          <template v-else>
+            <p>No sessions match your filters.</p>
+          </template>
         </div>
         <button v-for="s in sessions" :key="s.id"
           @click="selectSession(s)"
-          :class="['w-full text-left px-3 py-2 border-b border-gray-100 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors', selectedSession?.id === s.id ? 'bg-blue-50 dark:bg-gray-600' : '']">
+          :class="['w-full text-left px-3 py-2.5 border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors', selectedSession?.id === s.id ? 'bg-blue-50 dark:bg-blue-900/20 border-l-2 border-l-blue-500' : '']">
           <div class="flex items-center gap-1.5 mb-0.5">
-            <span :class="sourceBadgeClass(s.source)" class="text-[10px] px-1.5 py-0.5 rounded font-medium uppercase">{{ s.source }}</span>
-            <span class="text-xs text-gray-400">{{ s.message_count }} msgs</span>
+            <span :class="sourceBadgeClass(s.source)" class="text-[10px] px-1.5 py-0.5 rounded font-medium uppercase tracking-wide">{{ sourceLabel(s.source) }}</span>
+            <span class="text-xs text-gray-400 ml-auto">{{ s.message_count }} msgs</span>
           </div>
-          <div class="text-sm font-medium truncate">{{ s.title }}</div>
-          <div class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ shortPath(s.project_path) }}</div>
-          <div v-if="s.updated" class="text-xs text-gray-400">{{ formatDate(s.updated) }}</div>
+          <div class="text-sm font-medium truncate leading-snug">{{ s.title }}</div>
+          <div class="flex items-center gap-2 mt-0.5">
+            <span class="text-xs text-gray-500 dark:text-gray-400 truncate flex-1">{{ shortPath(s.project_path) }}</span>
+            <span v-if="s.updated" class="text-[10px] text-gray-400 whitespace-nowrap">{{ formatDate(s.updated) }}</span>
+          </div>
         </button>
       </div>
     </aside>
 
     <!-- Main content -->
-    <main class="flex-1 flex flex-col overflow-hidden">
+    <main class="flex-1 flex flex-col overflow-hidden bg-gray-50/50 dark:bg-gray-900">
       <template v-if="selectedSession">
         <!-- Session header -->
-        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex-shrink-0">
+        <div class="px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex-shrink-0">
           <div class="flex items-center gap-2 mb-1">
-            <span :class="sourceBadgeClass(selectedSession.source)" class="text-xs px-2 py-0.5 rounded font-medium uppercase">{{ selectedSession.source }}</span>
+            <span :class="sourceBadgeClass(selectedSession.source)" class="text-xs px-2 py-0.5 rounded font-medium uppercase tracking-wide">{{ sourceLabel(selectedSession.source) }}</span>
             <h2 class="text-base font-semibold truncate">{{ selectedSession.title }}</h2>
           </div>
           <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-            <span v-if="selectedSession.project_path">{{ selectedSession.project_path }}</span>
-            <span v-if="selectedSession.created">{{ formatDate(selectedSession.created) }}</span>
+            <span v-if="selectedSession.project_path" class="flex items-center gap-1">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+              {{ selectedSession.project_path }}
+            </span>
+            <span v-if="selectedSession.created" class="flex items-center gap-1">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+              {{ formatDate(selectedSession.created) }}
+            </span>
             <span>{{ selectedSession.message_count }} messages</span>
           </div>
           <div class="mt-2 flex gap-2">
-            <a :href="'/api/export/' + encodeURIComponent(selectedSession.id) + '?format=md'" class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">Export MD</a>
-            <a :href="'/api/export/' + encodeURIComponent(selectedSession.id) + '?format=json'" class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">Export JSON</a>
+            <a :href="'/api/export/' + encodeURIComponent(selectedSession.id) + '?format=md'"
+              class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              Export MD
+            </a>
+            <a :href="'/api/export/' + encodeURIComponent(selectedSession.id) + '?format=json'"
+              class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+              Export JSON
+            </a>
           </div>
         </div>
 
         <!-- Messages -->
-        <div class="flex-1 overflow-y-auto p-4 space-y-3" ref="messagesContainer">
-          <div v-if="messagesLoading" class="text-center text-sm text-gray-500 py-8">Loading messages...</div>
+        <div class="flex-1 overflow-y-auto px-5 py-4 space-y-3" ref="messagesContainer">
+          <div v-if="messagesLoading" class="text-center py-12">
+            <div class="inline-block animate-spin rounded-full h-6 w-6 border-2 border-gray-300 border-t-blue-500"></div>
+            <p class="mt-2 text-sm text-gray-500">Loading messages...</p>
+          </div>
           <template v-else>
             <div v-for="(msg, idx) in displayedMessages" :key="idx"
               :class="messageClass(msg)">
@@ -130,22 +207,23 @@
               <template v-if="isCollapsible(msg)">
                 <div class="collapsible-header flex items-center gap-2 text-sm" @click="toggleCollapse(idx)">
                   <span>{{ collapseIcon(msg) }}</span>
-                  <span class="font-medium">{{ collapseSummary(msg) }}</span>
-                  <span class="text-xs text-gray-400 ml-auto">{{ collapsed[idx] ? '\u25B6' : '\u25BC' }}</span>
+                  <span class="font-medium truncate">{{ collapseSummary(msg) }}</span>
+                  <svg :class="['w-3 h-3 ml-auto text-gray-400 transition-transform flex-shrink-0', collapsed[idx] ? '' : 'rotate-90']" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                 </div>
                 <div v-show="!collapsed[idx]" class="mt-2 msg-content text-sm" v-html="renderMarkdown(msg.content)"></div>
               </template>
               <!-- Regular message -->
               <template v-else>
-                <div class="flex items-center gap-2 mb-1">
-                  <span class="text-xs font-semibold uppercase" :class="roleColor(msg.role)">{{ msg.role }}</span>
-                  <span v-if="msg.timestamp" class="text-xs text-gray-400">{{ formatTime(msg.timestamp) }}</span>
+                <div class="flex items-center gap-2 mb-1.5">
+                  <span class="text-xs font-semibold uppercase tracking-wide" :class="roleColor(msg.role)">{{ msg.role }}</span>
+                  <span v-if="msg.timestamp" class="text-[11px] text-gray-400">{{ formatTime(msg.timestamp) }}</span>
                 </div>
-                <div class="msg-content text-sm" v-html="renderMarkdown(msg.content)"></div>
+                <div class="msg-content text-sm leading-relaxed" v-html="renderMarkdown(msg.content)"></div>
               </template>
             </div>
-            <div v-if="messages.length > displayedMessages.length" class="text-center py-3">
-              <button @click="loadMoreMessages" class="text-sm px-4 py-1.5 rounded bg-blue-500 text-white hover:bg-blue-600">
+            <div v-if="messages.length > displayedMessages.length" class="text-center py-4">
+              <button @click="loadMoreMessages"
+                class="text-sm px-5 py-2 rounded-lg bg-blue-500 text-white hover:bg-blue-600 transition-colors shadow-sm">
                 Load more ({{ messages.length - displayedMessages.length }} remaining)
               </button>
             </div>
@@ -154,8 +232,10 @@
       </template>
 
       <!-- Empty state -->
-      <div v-else class="flex-1 flex items-center justify-center text-gray-400 text-sm">
-        Select a session to view chat history
+      <div v-else class="flex-1 flex flex-col items-center justify-center text-gray-400 gap-3">
+        <svg class="w-16 h-16 text-gray-200 dark:text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+        <p class="text-sm">Select a session to view chat history</p>
+        <p class="text-xs text-gray-300 dark:text-gray-600">Browse conversations from Cursor, Claude Code, or OpenCode</p>
       </div>
     </main>
   </div>
@@ -200,6 +280,7 @@ createApp({
       document.documentElement.classList.toggle('dark', dark.value);
       document.getElementById('hljs-dark').disabled = !dark.value;
       document.getElementById('hljs-light').disabled = dark.value;
+      localStorage.setItem('aichat-dark', dark.value ? '1' : '0');
     }
 
     async function loadSources() {
@@ -220,7 +301,6 @@ createApp({
         const resp = await fetch('/api/sessions?' + params);
         const data = await resp.json();
         sessions.value = data.sessions;
-        // Collect unique projects
         const allProjects = new Set(data.sessions.map(s => s.project_path).filter(Boolean));
         projects.value = [...allProjects].sort();
       } catch (e) { console.error('Failed to load sessions:', e); }
@@ -236,7 +316,6 @@ createApp({
         const resp = await fetch('/api/session/' + encodeURIComponent(session.id));
         const data = await resp.json();
         messages.value = data.messages;
-        // Auto-collapse tool/thinking messages
         data.messages.forEach((msg, idx) => {
           if (isCollapsible(msg)) collapsed.value[idx] = true;
         });
@@ -251,18 +330,14 @@ createApp({
       searchTimeout = setTimeout(() => loadSessions(), 300);
     }
 
-    function loadMoreMessages() {
-      messageLimit.value += 50;
-    }
+    function loadMoreMessages() { messageLimit.value += 50; }
 
     function isCollapsible(msg) {
       return ['tool', 'thinking'].includes(msg.role) ||
              ['tool_call', 'tool_result', 'diff', 'thinking'].includes(msg.message_type);
     }
 
-    function toggleCollapse(idx) {
-      collapsed.value[idx] = !collapsed.value[idx];
-    }
+    function toggleCollapse(idx) { collapsed.value[idx] = !collapsed.value[idx]; }
 
     function collapseIcon(msg) {
       if (msg.message_type === 'thinking' || msg.role === 'thinking') return '\uD83E\uDDE0';
@@ -272,9 +347,13 @@ createApp({
 
     function collapseSummary(msg) {
       if (msg.message_type === 'thinking' || msg.role === 'thinking') return 'Thinking...';
-      if (msg.metadata?.tool_name) return msg.metadata.tool_name + (msg.metadata.file_path ? ': ' + msg.metadata.file_path : '');
+      if (msg.metadata?.tool_name) {
+        let s = msg.metadata.tool_name;
+        if (msg.metadata.file_path) s += ': ' + msg.metadata.file_path;
+        return s;
+      }
       if (msg.message_type === 'diff') return 'Edit' + (msg.metadata?.file_path ? ': ' + msg.metadata.file_path : '');
-      const firstLine = msg.content.split('\n')[0].slice(0, 80);
+      const firstLine = (msg.content || '').split('\n')[0].slice(0, 80);
       return firstLine || 'Tool call';
     }
 
@@ -283,16 +362,16 @@ createApp({
       if (msg.role === 'user') return base + 'bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-400';
       if (msg.role === 'error') return base + 'bg-red-50 dark:bg-red-900/20 border-l-4 border-red-400';
       if (msg.role === 'tool' || msg.message_type === 'tool_call' || msg.message_type === 'tool_result')
-        return base + 'bg-gray-50 dark:bg-gray-800 ml-4 text-gray-600 dark:text-gray-400';
+        return base + 'bg-gray-100/80 dark:bg-gray-800/60 ml-4 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700';
       if (msg.role === 'thinking' || msg.message_type === 'thinking')
-        return base + 'bg-purple-50 dark:bg-purple-900/20 ml-4';
-      return base + 'bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700';
+        return base + 'bg-purple-50 dark:bg-purple-900/20 ml-4 border border-purple-200 dark:border-purple-800';
+      return base + 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm';
     }
 
     function roleColor(role) {
       const colors = {
         user: 'text-blue-600 dark:text-blue-400',
-        assistant: 'text-gray-700 dark:text-gray-300',
+        assistant: 'text-emerald-600 dark:text-emerald-400',
         tool: 'text-gray-500',
         thinking: 'text-purple-600 dark:text-purple-400',
         error: 'text-red-600 dark:text-red-400',
@@ -303,33 +382,35 @@ createApp({
 
     function sourceBadgeClass(source) {
       const classes = {
-        cursor: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
-        claude_code: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
-        opencode: 'bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-300',
+        cursor: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+        claude_code: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
+        opencode: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300',
       };
       return classes[source] || 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
+    }
+
+    function sourceLabel(source) {
+      const labels = { cursor: 'Cursor', claude_code: 'Claude', opencode: 'OpenCode' };
+      return labels[source] || source;
     }
 
     function renderMarkdown(content) {
       if (!content) return '';
       try {
-        const html = marked.parse(content, { breaks: true, gfm: true });
-        return html;
+        return marked.parse(content, { breaks: true, gfm: true });
       } catch { return content; }
     }
 
     function formatDate(iso) {
       if (!iso) return '';
-      try {
-        return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-      } catch { return iso; }
+      try { return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); }
+      catch { return iso; }
     }
 
     function formatTime(iso) {
       if (!iso) return '';
-      try {
-        return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-      } catch { return iso; }
+      try { return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+      catch { return iso; }
     }
 
     function shortPath(p) {
@@ -340,6 +421,9 @@ createApp({
     }
 
     onMounted(async () => {
+      // Restore dark mode preference
+      const saved = localStorage.getItem('aichat-dark');
+      if (saved !== null) dark.value = saved === '1';
       document.documentElement.classList.toggle('dark', dark.value);
       document.getElementById('hljs-dark').disabled = !dark.value;
       document.getElementById('hljs-light').disabled = dark.value;
@@ -355,15 +439,35 @@ createApp({
       toggleDark, loadSessions, selectSession, debounceSearch,
       loadMoreMessages, isCollapsible, toggleCollapse, collapseIcon,
       collapseSummary, messageClass, roleColor, sourceBadgeClass,
-      renderMarkdown, formatDate, formatTime, shortPath,
+      sourceLabel, renderMarkdown, formatDate, formatTime, shortPath,
     };
   }
 }).mount('#app');
 
-// Highlight code blocks after Vue renders
+// Highlight code blocks and add copy buttons after Vue renders
 const observer = new MutationObserver(() => {
   document.querySelectorAll('.msg-content pre code:not(.hljs)').forEach(el => {
     hljs.highlightElement(el);
+  });
+  // Add copy buttons to code blocks that don't have one
+  document.querySelectorAll('.msg-content pre:not(.has-copy-btn)').forEach(pre => {
+    pre.classList.add('has-copy-btn');
+    const wrapper = document.createElement('div');
+    wrapper.className = 'code-wrapper';
+    pre.parentNode.insertBefore(wrapper, pre);
+    wrapper.appendChild(pre);
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = 'Copy';
+    btn.addEventListener('click', () => {
+      const code = pre.querySelector('code')?.textContent || pre.textContent;
+      navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = 'Copied!';
+        btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1500);
+      });
+    });
+    wrapper.appendChild(btn);
   });
 });
 observer.observe(document.body, { childList: true, subtree: true });
