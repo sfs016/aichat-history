@@ -1,0 +1,1681 @@
+
+╭─── Claude Code v2.1.34 ──────────────────────────────────────────────────────╮
+│                           │ Tips for getting started                         │
+│    Welcome back Farhaj!   │ Run /init to create a CLAUDE.md file with instr… │
+│                           │ ──────────────────────────────────────────────── │
+│          ▐▛███▜▌          │ Recent activity                                  │
+│         ▝▜█████▛▘         │ No recent activity                               │
+│           ▘▘ ▝▝           │                                                  │
+│                           │                                                  │
+│   Opus 4.6 · Claude Max   │                                                  │
+│   ~/dev/aichat-history    │                                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✻ Conversation compacted (ctrl+o for history)
+
+  ⎿  Read src/aichat_history/backends/opencode.py (267 lines)
+  ⎿  Read tests/test_opencode.py (140 lines)
+  ⎿  Read tests/test_claude_code.py (186 lines)
+  ⎿  Read tests/conftest.py (349 lines)
+  ⎿  Read src/aichat_history/backends/claude_code.py (430 lines)
+
+⏺ ★ Insight ─────────────────────────────────────
+  Continuing from where we left off — we have three pending fixes before v1:
+  1. OpenCode v1.0 content is permanently lost (show clear notice instead of
+  empty metadata)
+  2. Claude Code needs to skip "summary"/"queue-operation" types and handle
+  image blocks
+  3. Frontend needs message navigation tabs between user/agent messages
+  ─────────────────────────────────────────────────
+
+  Let me check current task state and read the files I need to modify.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Good, I have the full picture. Let me implement all three fixes now. I'll
+  start with the backend fixes in parallel, then do the frontend.
+
+  Task #10: OpenCode v1.0 — Show clear "content unavailable" notice instead of
+  misleading [mode: plan, finish: tool-calls]
+
+  Task #11: Claude Code — Skip "summary"/"queue-operation" types, handle image
+  blocks in tool results
+
+  Task #12: Frontend — Add message navigation tabs + collapsible assistant
+  responses
+
+⏺ ★ Insight ─────────────────────────────────────
+  OpenCode v1.0 content gap: In v1.0 (version 1.0.x), OpenCode stored messages
+  as metadata-only JSON files — they tracked role, mode, finish reason, and
+  tokens, but the actual conversation text was never written to disk. When
+  OpenCode migrated to v1.1, it added part/ directories for content, but never
+  backfilled existing sessions. This means v1.0 assistant content is permanently
+   lost. The right approach is to clearly communicate this to users rather than
+  showing raw metadata fields.
+  ─────────────────────────────────────────────────
+
+⏺ Update(src/aichat_history/backends/opencode.py)
+  ⎿  Added 10 lines, removed 10 lines
+      236              if title:                                         
+      237                  content = title                               
+      238              elif role == "assistant":                         
+      239 -                # For assistant messages with no content, show
+          - mode/finish info                                             
+      240 -                mode = data.get("mode", "")                   
+      241 -                finish = data.get("finish", "")               
+      242 -                if mode or finish:                            
+      243 -                    parts_info = []                           
+      244 -                    if mode:                                  
+      245 -                        parts_info.append(f"mode: {mode}")    
+      246 -                    if finish:                                
+      247 -                        parts_info.append(f"finish:           
+          -{finish}")                                                    
+      248 -                    content = f"[{', '.join(parts_info)}]"    
+      239 +                # v1.0 assistant messages have no content on  
+          +disk (never persisted).                                       
+      240 +                # Show a clear notice instead of raw          
+          +metadata.                                                     
+      241 +                content = (                                   
+      242 +                    "*Content not available — this session    
+          +uses an older OpenCode "                                      
+      243 +                    "storage format (v1.0) that did not save  
+          +message text to disk.*"                                       
+      244 +                )                                             
+      245 +            elif role == "user":                              
+      246 +                content = (                                   
+      247 +                    "*Content not available — older OpenCode  
+          +storage format (v1.0).*"                                      
+      248 +                )                                             
+      249                                                                
+      250          return Message(                                       
+      251              role=role,                                        
+
+⏺ Now fix the Claude Code backend — skip "summary" and "queue-operation" entry
+  types, and handle image blocks in tool results:
+
+⏺ Update(src/aichat_history/backends/claude_code.py)
+  ⎿  Added 4 lines, removed 1 line
+      237          timestamp = _parse_iso(entry.get("timestamp"))        
+      238                                                                
+      239          # Skip non-message entry types                        
+      240 -        if entry_type in ("file-history-snapshot",            
+          -"progress", "system"):                                        
+      240 +        if entry_type in (                                    
+      241 +            "file-history-snapshot", "progress", "system",    
+      242 +            "summary", "queue-operation",                     
+      243 +        ):                                                    
+      244              return []                                         
+      245                                                                
+      246          if entry_type in ("human", "user"):                   
+
+⏺ Now handle image blocks in tool_result content arrays:
+
+⏺ Update(src/aichat_history/backends/claude_code.py)
+  ⎿  Added 12 lines, removed 3 lines
+      293                  # Tool execution result — show as tool        
+           message                                                       
+      294                  tool_content = block.get("content", "")       
+      295                  if isinstance(tool_content, list):            
+      296 -                    # Content can be array of blocks          
+      296 +                    # Content can be array of blocks          
+          + (text, image, etc.)                                          
+      297                      parts = []                                
+      298                      for sub in tool_content:                  
+      299 -                        if isinstance(sub, dict)              
+          - and sub.get("type") == "text":                               
+      300 -                            parts.append(sub.get("text", "")) 
+      299 +                        if isinstance(sub, dict):             
+      300 +                            sub_type = sub.get("type", "")    
+      301 +                            if sub_type == "text":            
+      302 +                                parts.append(sub.get("text",  
+          +""))                                                          
+      303 +                            elif sub_type == "image":         
+      304 +                                parts.append("[Image]")       
+      305 +                            else:                             
+      306 +                                # Unknown block type — try    
+          +text field                                                    
+      307 +                                text = sub.get("text", "")    
+      308 +                                if text:                      
+      309 +                                    parts.append(text)        
+      310                          elif isinstance(sub, str):            
+      311                              parts.append(sub)                 
+      312                      tool_content = "\n".join(parts)           
+
+⏺ ★ Insight ─────────────────────────────────────
+  Claude Code tool_result image blocks: When Claude Code reads screenshots or
+  images via tools, the result comes back as {"type": "image", "source": 
+  {"type": "base64", "data": "..."}}. We show [Image] instead of dumping base64
+  data into the UI. The "summary" and "queue-operation" entry types are internal
+   bookkeeping that appear in JSONL but have no user-facing content.
+  ─────────────────────────────────────────────────
+
+  Now update the tests to match the new OpenCode v1.0 behavior and add tests for
+   Claude Code skip types:
+
+⏺ Update(tests/test_opencode.py)
+  ⎿  Added 5 lines, removed 4 lines
+      120              assert user_msg.role == "user"                    
+      121              assert "login page" in user_msg.content.lower()   
+      122                                                                
+      123 -    def test_v1_assistant_message_shows_metadata(self,        
+          -tmp_opencode_v1_dir):                                         
+      124 -        """v1.0 assistant messages should show mode/finish    
+          -metadata."""                                                  
+      123 +    def                                                       
+          +test_v1_assistant_message_shows_unavailable_notice(self,      
+          +tmp_opencode_v1_dir):                                         
+      124 +        """v1.0 assistant messages should show a              
+          +clear 'content unavailable' notice."""                        
+      125          provider = OpenCodeProvider()                         
+      126          with patch.object(provider, "get_base_path",          
+           return_value=tmp_opencode_v1_dir):                            
+      127              messages =                                        
+           provider.get_session_messages("opencode:ses_old_001")         
+      128              asst_msg = messages[1]                            
+      129              assert asst_msg.role == "assistant"               
+      130 -            # Should show mode/finish info since no content   
+          -available                                                     
+      131 -            assert "code" in asst_msg.content.lower() or "    
+          -stop" in asst_msg.content.lower()                             
+      130 +            # Should show clear notice about v1.0 limitation  
+      131 +            assert "not available" in asst_msg.content.lower()
+      132 +            assert "v1.0" in asst_msg.content                 
+      133                                                                
+      134      def test_v1_messages_not_empty(self,                      
+           tmp_opencode_v1_dir):                                         
+      135          """No message should have empty content in v1.0       
+           format."""                                                    
+
+⏺ Now add tests for Claude Code "summary" and "queue-operation" skip, and image
+  block handling. Let me read the current test fixture to understand what we
+  need to add:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ I need to add "summary" and "queue-operation" lines to the fixture, and add a
+  test for image blocks in tool results. Let me update the fixture first:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Update(tests/conftest.py)
+  ⎿  Added 22 lines
+      212              "type": "progress",                               
+      213              "data": {"type": "hook_progress"},                
+      214          }),                                                   
+      215 +        # 10. Summary entry (should be skipped)               
+      216 +        json.dumps({                                          
+      217 +            "type": "summary",                                
+      218 +            "summary": "Refactored auth module into separate  
+          +files",                                                       
+      219 +        }),                                                   
+      220 +        # 11. Queue-operation entry (should be skipped)       
+      221 +        json.dumps({                                          
+      222 +            "type": "queue-operation",                        
+      223 +            "operation": "enqueue",                           
+      224 +        }),                                                   
+      225 +        # 12. Tool result with image block                    
+      226 +        json.dumps({                                          
+      227 +            "type": "user",                                   
+      228 +            "message": {"role": "user", "content": [          
+      229 +                {"type": "tool_result", "tool_use_id":        
+          +"toolu_003", "content": [                                     
+      230 +                    {"type": "text", "text": "Command         
+          +output:\nDirectory created"},                                 
+      231 +                    {"type": "image", "source": {"type":      
+          +"base64", "media_type": "image/png", "data":                  
+          +"iVBORw0KGgo="}},                                             
+      232 +                ], "is_error": False},                        
+      233 +            ]},                                               
+      234 +            "timestamp": "2025-01-20T10:05:31Z",              
+      235 +            "uuid": "uuid-008",                               
+      236 +        }),                                                   
+      237      ]                                                         
+      238      (project_dir /                                            
+           "session-001.jsonl").write_text("\n".join(lines),             
+           encoding="utf-8")                                             
+      239                                                                
+
+⏺ Now update the test_message_count_is_comprehensive test and add new tests:
+
+⏺ Update(tests/test_claude_code.py)
+  ⎿  Added 31 lines, removed 2 lines
+      157              # Line 7: user text -> 1 msg                      
+      158              # Line 8: tool_use only -> 1 msg                  
+      159              # Line 9: progress -> skipped                     
+      160 -            # Total: 10 messages                              
+      161 -            assert len(messages) == 10                        
+      160 +            # Line 10: summary -> skipped                     
+      161 +            # Line 11: queue-operation -> skipped             
+      162 +            # Line 12: tool_result with image -> 1 msg        
+      163 +            # Total: 11 messages                              
+      164 +            assert len(messages) == 11                        
+      165                                                                
+      166 +    def test_summary_and_queue_entries_skipped(self,          
+          +tmp_claude_code_dir):                                         
+      167 +        """summary and queue-operation entries should be      
+          +skipped."""                                                   
+      168 +        provider = ClaudeCodeProvider()                       
+      169 +        with patch.object(provider, "get_base_path",          
+          +return_value=tmp_claude_code_dir):                            
+      170 +            messages = provider.get_session_messages(         
+      171 +                                                              
+          +"claude:-Users-testuser-dev-myapp:session-001"                
+      172 +            )                                                 
+      173 +            for m in messages:                                
+      174 +                assert "Refactored auth module into separate" 
+          + not in m.content                                             
+      175 +                assert "enqueue" not in m.content             
+      176 +                                                              
+      177 +    def test_tool_result_with_image_block(self,               
+          +tmp_claude_code_dir):                                         
+      178 +        """Tool results with image blocks should show [Image] 
+          + placeholder."""                                              
+      179 +        provider = ClaudeCodeProvider()                       
+      180 +        with patch.object(provider, "get_base_path",          
+          +return_value=tmp_claude_code_dir):                            
+      181 +            messages = provider.get_session_messages(         
+      182 +                                                              
+          +"claude:-Users-testuser-dev-myapp:session-001"                
+      183 +            )                                                 
+      184 +            # Last message is the tool result with image      
+      185 +            img_msg = messages[-1]                            
+      186 +            assert img_msg.message_type == "tool_result"      
+      187 +            assert "Directory created" in img_msg.content     
+      188 +            assert "[Image]" in img_msg.content               
+      189 +            # Should NOT contain base64 data                  
+      190 +            assert "iVBORw0KGgo" not in img_msg.content       
+      191 +                                                              
+      192      def test_get_session_messages_invalid_id(self,            
+           tmp_claude_code_dir):                                         
+      193          provider = ClaudeCodeProvider()                       
+      194          with patch.object(provider, "get_base_path",          
+           return_value=tmp_claude_code_dir):                            
+
+⏺ Now let me run the tests to make sure the backend changes are solid:
+
+⏺ Bash(python -m pytest tests/test_opencode.py tests/test_claude_code.py -v
+      2>&1)
+  ⎿ ============================= test session starts =====================
+    =========
+    platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.5.0 -- /opt/an
+    … +76 lines (ctrl+o to expand)
+
+
+
+⏺ All 32 tests pass. Now let me mark tasks #10 and #11 as complete and move to
+  the frontend:
+
+⏺ Now for the frontend. The user wants:
+  1. Message navigation tabs — a floating nav bar to jump between user/agent
+  messages
+  2. Collapsible assistant responses — long assistant messages should be
+  collapsible
+
+  ★ Insight ─────────────────────────────────────
+  Message navigation UX: In long AI coding sessions, there can be 50+ messages
+  with tool calls between each user prompt. Navigation tabs let users quickly
+  jump to the next user question or the next agent response without scrolling
+  through all the tool calls and thinking blocks. The approach: build an index
+  of "conversation turns" (user messages and their paired assistant responses)
+  and provide prev/next buttons plus a floating turn indicator.
+  ─────────────────────────────────────────────────
+
+  Let me now implement the frontend changes. This is a substantial rewrite of
+  the message display area:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 30 lines
+      59      .collapsible-header { cursor: pointer; user-select: none;  
+          }                                                              
+      60      .collapsible-header:hover { opacity: 0.8; }                
+      61                                                                 
+      62 +    /* Message navigation bar */                               
+      63 +    .msg-nav {                                                 
+      64 +      position: sticky; top: 0; z-index: 10;                   
+      65 +      backdrop-filter: blur(8px);                              
+      66 +      -webkit-backdrop-filter: blur(8px);                      
+      67 +    }                                                          
+      68 +    .msg-nav-btn {                                             
+      69 +      padding: 0.25rem 0.5rem; border-radius: 0.375rem;        
+      70 +      font-size: 0.75rem; font-weight: 500;                    
+      71 +      transition: all 0.15s; cursor: pointer;                  
+      72 +      border: 1px solid transparent;                           
+      73 +    }                                                          
+      74 +    .msg-nav-btn:hover:not(:disabled) { background:            
+         +rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.3); }    
+      75 +    .msg-nav-btn:disabled { opacity: 0.3; cursor: default; }   
+      76 +    .msg-nav-btn.active { background: rgba(59,130,246,0.15);   
+         +border-color: rgba(59,130,246,0.4); color: #3b82f6; }          
+      77 +                                                               
+      78 +    /* Long content collapse */                                
+      79 +    .content-collapsed { max-height: 300px; overflow: hidden;  
+         +position: relative; }                                          
+      80 +    .content-collapsed::after {                                
+      81 +      content: ''; position: absolute; bottom: 0; left: 0;     
+         +right: 0;                                                      
+      82 +      height: 60px;                                            
+      83 +      background: linear-gradient(transparent,                 
+         +var(--fade-color, white));                                     
+      84 +      pointer-events: none;                                    
+      85 +    }                                                          
+      86 +    .dark .content-collapsed::after { --fade-color: #1f2937; } 
+      87 +    .content-collapsed-white::after { --fade-color: white; }   
+      88 +    .dark .content-collapsed-white::after { --fade-color:      
+         +#1f2937; }                                                     
+      89 +    .content-collapsed-blue::after { --fade-color: #eff6ff; }  
+      90 +    .dark .content-collapsed-blue::after { --fade-color:       
+         +rgba(30,58,138,0.2); }                                         
+      91 +                                                               
+      92      /* Scrollbar styling */                                    
+      93      ::-webkit-scrollbar { width: 6px; height: 6px; }           
+      94      ::-webkit-scrollbar-track { background: transparent; }     
+
+⏺ Now update the messages display area to add the navigation bar and collapsible
+   long messages:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 43 lines, removed 2 lines
+      224            </div>                                              
+      225          </div>                                                
+      226                                                                
+      227 +        <!-- Message navigation bar -->                       
+      228 +        <div v-if="!messagesLoading && messages.length > 0"   
+          +class="msg-nav flex items-center gap-2 px-5 py-2 border-b     
+          +border-gray-200 dark:border-gray-700 bg-white/80              
+          +dark:bg-gray-800/80 flex-shrink-0">                           
+      229 +          <span class="text-xs text-gray-500                  
+          +dark:text-gray-400 mr-1">Navigate:</span>                     
+      230 +          <button @click="jumpToPrev('user')"                 
+          +:disabled="!canJump('user', -1)" class="msg-nav-btn"          
+          +title="Previous user message">                                
+      231 +            <svg class="w-3 h-3 inline -mt-0.5" fill="none"   
+          +stroke="currentColor" viewBox="0 0 24 24"><path               
+          +stroke-linecap="round" stroke-linejoin="round"                
+          +stroke-width="2" d="M15 19l-7-7 7-7"/></svg>                  
+      232 +            User                                              
+      233 +          </button>                                           
+      234 +          <button @click="jumpToNext('user')"                 
+          +:disabled="!canJump('user', 1)" class="msg-nav-btn"           
+          +title="Next user message">                                    
+      235 +            User                                              
+      236 +            <svg class="w-3 h-3 inline -mt-0.5" fill="none"   
+          +stroke="currentColor" viewBox="0 0 24 24"><path               
+          +stroke-linecap="round" stroke-linejoin="round"                
+          +stroke-width="2" d="M9 5l7 7-7 7"/></svg>                     
+      237 +          </button>                                           
+      238 +          <span class="text-gray-300                          
+          +dark:text-gray-600">|</span>                                  
+      239 +          <button @click="jumpToPrev('assistant')"            
+          +:disabled="!canJump('assistant', -1)" class="msg-nav-btn"     
+          +title="Previous agent response">                              
+      240 +            <svg class="w-3 h-3 inline -mt-0.5" fill="none"   
+          +stroke="currentColor" viewBox="0 0 24 24"><path               
+          +stroke-linecap="round" stroke-linejoin="round"                
+          +stroke-width="2" d="M15 19l-7-7 7-7"/></svg>                  
+      241 +            Agent                                             
+      242 +          </button>                                           
+      243 +          <button @click="jumpToNext('assistant')"            
+          +:disabled="!canJump('assistant', 1)" class="msg-nav-btn"      
+          +title="Next agent response">                                  
+      244 +            Agent                                             
+      245 +            <svg class="w-3 h-3 inline -mt-0.5" fill="none"   
+          +stroke="currentColor" viewBox="0 0 24 24"><path               
+          +stroke-linecap="round" stroke-linejoin="round"                
+          +stroke-width="2" d="M9 5l7 7-7 7"/></svg>                     
+      246 +          </button>                                           
+      247 +          <span class="ml-auto text-[11px] text-gray-400">    
+      248 +            {{ turnSummary }}                                 
+      249 +          </span>                                             
+      250 +          <button v-if="hasCollapsibleAssistant"              
+          +@click="toggleAllAssistant()" class="msg-nav-btn text-[11px]" 
+          + :title="allAssistantCollapsed ? 'Expand all agent responses' 
+          + : 'Collapse all agent responses'">                           
+      251 +            {{ allAssistantCollapsed ? 'Expand All' :         
+          +'Collapse All' }}                                             
+      252 +          </button>                                           
+      253 +        </div>                                                
+      254 +                                                              
+      255          <!-- Messages -->                                     
+      256          <div class="flex-1 overflow-y-auto px-5 py-4          
+           space-y-3" ref="messagesContainer">                           
+      257            <div v-if="messagesLoading" class="text-center      
+           py-12">                                                       
+     ...
+      232            </div>                                              
+      233            <template v-else>                                   
+      234              <div v-for="(msg, idx) in displayedMessages"      
+           :key="idx"                                                    
+      235 +              :ref="el => setMsgRef(el, idx)"                 
+      236                :class="messageClass(msg)">                     
+      237                <!-- Collapsible: tool, thinking, diff -->      
+      238                <template v-if="isCollapsible(msg)">            
+     ...
+      242                  </div>                                        
+      243                  <div v-show="!collapsed[idx]" class="mt-2     
+           msg-content text-sm"                                          
+           v-html="renderMarkdown(msg.content)"></div>                   
+      244                </template>                                     
+      245 -              <!-- Regular message -->                        
+      245 +              <!-- Regular message (user or assistant) -->    
+      246                <template v-else>                               
+      247                  <div class="flex items-center gap-2 mb-1.5">  
+      248                    <span class="text-xs font-semibold          
+           uppercase tracking-wide" :class="roleColor(msg.role)">{{      
+           msg.role }}</span>                                            
+      249                    <span v-if="msg.timestamp"                  
+           class="text-[11px] text-gray-400">{{                          
+           formatTime(msg.timestamp) }}</span>                           
+      250 +                  <!-- Collapse toggle for long assistant     
+          +messages -->                                                  
+      251 +                  <button v-if="msg.role === 'assistant' &&   
+          +isLongContent(msg.content)"                                   
+      252 +                    @click="toggleContentCollapse(idx)"       
+      253 +                    class="ml-auto text-[11px] px-2 py-0.5    
+          +rounded border border-gray-200 dark:border-gray-600           
+          +text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700        
+          +transition-colors">                                           
+      254 +                    {{ contentCollapsed[idx] ? 'Show full' :  
+          +'Collapse' }}                                                 
+      255 +                  </button>                                   
+      256                  </div>                                        
+      257 -                <div class="msg-content text-sm               
+          -leading-relaxed" v-html="renderMarkdown(msg.content)"></div>  
+      257 +                <div :class="['msg-content text-sm            
+          +leading-relaxed', contentCollapsed[idx] ? 'content-collapsed' 
+          + + (msg.role === 'user' ? ' content-collapsed-blue' : '       
+          +content-collapsed-white') : '']"                              
+      258 +                  v-html="renderMarkdown(msg.content)"></div> 
+      259 +                <button v-if="contentCollapsed[idx]"          
+      260 +                  @click="toggleContentCollapse(idx)"         
+      261 +                  class="mt-2 text-xs text-blue-500           
+          +hover:text-blue-600 dark:text-blue-400 font-medium">          
+      262 +                  Show full response                          
+      263 +                </button>                                     
+      264                </template>                                     
+      265              </div>                                            
+      266              <div v-if="messages.length >                      
+           displayedMessages.length" class="text-center py-4">           
+
+⏺ Now update the Vue JavaScript to add the navigation logic and content
+  collapse:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 3 lines
+      330      const sortBy = ref('messages');                           
+      331      const projectFilter = ref('');                            
+      332      const collapsed = ref({});                                
+      333 +    const contentCollapsed = ref({});                         
+      334      const messageLimit = ref(50);                             
+      335      const messagesContainer = ref(null);                      
+      336 +    const msgRefs = ref({});                                  
+      337 +    const currentNavIndex = ref({user: -1, assistant: -1});   
+      338                                                                
+      339      let searchTimeout = null;                                 
+      340                                                                
+
+⏺ Now add the navigation helper functions. I'll add them after the existing
+  loadMoreMessages function:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 93 lines
+      406                                                                
+      407      function loadMoreMessages() { messageLimit.value += 50; } 
+      408                                                                
+      409 +    // ── Message navigation                                  
+          +──────────────────────────────────                            
+      410 +    function setMsgRef(el, idx) { if (el) msgRefs.value[idx]  
+          += el; }                                                       
+      411 +                                                              
+      412 +    function getMsgIndices(role) {                            
+      413 +      const indices = [];                                     
+      414 +      const msgs = displayedMessages.value;                   
+      415 +      for (let i = 0; i < msgs.length; i++) {                 
+      416 +        if (msgs[i].role === role) indices.push(i);           
+      417 +      }                                                       
+      418 +      return indices;                                         
+      419 +    }                                                         
+      420 +                                                              
+      421 +    function canJump(role, direction) {                       
+      422 +      const indices = getMsgIndices(role);                    
+      423 +      if (indices.length === 0) return false;                 
+      424 +      const curr = currentNavIndex.value[role];               
+      425 +      if (direction > 0) return curr < indices.length - 1;    
+      426 +      if (direction < 0) return curr > 0;                     
+      427 +      return false;                                           
+      428 +    }                                                         
+      429 +                                                              
+      430 +    function jumpToNext(role) {                               
+      431 +      const indices = getMsgIndices(role);                    
+      432 +      if (indices.length === 0) return;                       
+      433 +      let next = currentNavIndex.value[role] + 1;             
+      434 +      if (next >= indices.length) return;                     
+      435 +      currentNavIndex.value[role] = next;                     
+      436 +      scrollToMessage(indices[next]);                         
+      437 +    }                                                         
+      438 +                                                              
+      439 +    function jumpToPrev(role) {                               
+      440 +      const indices = getMsgIndices(role);                    
+      441 +      if (indices.length === 0) return;                       
+      442 +      let prev = currentNavIndex.value[role] - 1;             
+      443 +      if (prev < 0) return;                                   
+      444 +      currentNavIndex.value[role] = prev;                     
+      445 +      scrollToMessage(indices[prev]);                         
+      446 +    }                                                         
+      447 +                                                              
+      448 +    function scrollToMessage(idx) {                           
+      449 +      const el = msgRefs.value[idx];                          
+      450 +      if (el) {                                               
+      451 +        el.scrollIntoView({ behavior: 'smooth', block:        
+          +'start' });                                                   
+      452 +        // Flash highlight                                    
+      453 +        el.style.transition = 'box-shadow 0.3s';              
+      454 +        el.style.boxShadow = '0 0 0 2px                       
+          +rgba(59,130,246,0.5)';                                        
+      455 +        setTimeout(() => { el.style.boxShadow = ''; }, 1200); 
+      456 +      }                                                       
+      457 +    }                                                         
+      458 +                                                              
+      459 +    const turnSummary = computed(() => {                      
+      460 +      const userCount = getMsgIndices('user').length;         
+      461 +      const asstCount = getMsgIndices('assistant').length;    
+      462 +      return `${userCount} user, ${asstCount} agent msgs`;    
+      463 +    });                                                       
+      464 +                                                              
+      465 +    // ── Long content collapse                               
+          +───────────────────────────────                               
+      466 +    const LONG_CONTENT_THRESHOLD = 800; // characters         
+      467 +                                                              
+      468 +    function isLongContent(content) {                         
+      469 +      return content && content.length >                      
+          +LONG_CONTENT_THRESHOLD;                                       
+      470 +    }                                                         
+      471 +                                                              
+      472 +    function toggleContentCollapse(idx) {                     
+      473 +      contentCollapsed.value[idx] =                           
+          +!contentCollapsed.value[idx];                                 
+      474 +    }                                                         
+      475 +                                                              
+      476 +    const hasCollapsibleAssistant = computed(() => {          
+      477 +      return displayedMessages.value.some(m => m.role ===     
+          +'assistant' && isLongContent(m.content));                     
+      478 +    });                                                       
+      479 +                                                              
+      480 +    const allAssistantCollapsed = computed(() => {            
+      481 +      const msgs = displayedMessages.value;                   
+      482 +      let anyLong = false;                                    
+      483 +      for (let i = 0; i < msgs.length; i++) {                 
+      484 +        if (msgs[i].role === 'assistant' &&                   
+          +isLongContent(msgs[i].content)) {                             
+      485 +          anyLong = true;                                     
+      486 +          if (!contentCollapsed.value[i]) return false;       
+      487 +        }                                                     
+      488 +      }                                                       
+      489 +      return anyLong;                                         
+      490 +    });                                                       
+      491 +                                                              
+      492 +    function toggleAllAssistant() {                           
+      493 +      const shouldCollapse = !allAssistantCollapsed.value;    
+      494 +      const msgs = displayedMessages.value;                   
+      495 +      for (let i = 0; i < msgs.length; i++) {                 
+      496 +        if (msgs[i].role === 'assistant' &&                   
+          +isLongContent(msgs[i].content)) {                             
+      497 +          contentCollapsed.value[i] = shouldCollapse;         
+      498 +        }                                                     
+      499 +      }                                                       
+      500 +    }                                                         
+      501 +                                                              
+      502      function isCollapsible(msg) {                             
+      503        return ['tool', 'thinking'].includes(msg.role) ||       
+      504               ['tool_call', 'tool_result', 'diff',             
+           'thinking'].includes(msg.message_type);                       
+
+⏺ Now update the selectSession function to reset navigation state and
+  auto-collapse long assistant messages:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 7 lines
+      386        messagesLoading.value = true;                           
+      387        messageLimit.value = 50;                                
+      388        collapsed.value = {};                                   
+      389 +      contentCollapsed.value = {};                            
+      390 +      msgRefs.value = {};                                     
+      391 +      currentNavIndex.value = {user: 0, assistant: 0};        
+      392        try {                                                   
+      393          const resp = await fetch('/api/session/' +            
+           encodeURIComponent(session.id));                              
+      394          const data = await resp.json();                       
+      395          messages.value = data.messages;                       
+      396          data.messages.forEach((msg, idx) => {                 
+      397            if (isCollapsible(msg)) collapsed.value[idx] =      
+           true;                                                         
+      398 +          // Auto-collapse long assistant messages            
+      399 +          if (msg.role === 'assistant' &&                     
+          +isLongContent(msg.content)) {                                 
+      400 +            contentCollapsed.value[idx] = true;               
+      401 +          }                                                   
+      402          });                                                   
+      403        } catch (e) { console.error('Failed to load messages:', 
+            e); }                                                        
+      404        messagesLoading.value = false;                          
+
+⏺ Finally, update the return statement to expose the new functions:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 5 lines, removed 2 lines
+      608      return {                                                  
+      609        dark, sources, sessions, projects, selectedSession,     
+           messages,                                                     
+      610        loading, messagesLoading, sourceFilter, searchQuery,    
+           sortBy,                                                       
+      611 -      projectFilter, collapsed, displayedMessages, sourceTabs,
+      612 -      messagesContainer, messageLimit,                        
+      611 +      projectFilter, collapsed, contentCollapsed,             
+          +displayedMessages, sourceTabs,                                
+      612 +      messagesContainer, messageLimit, turnSummary,           
+      613 +      hasCollapsibleAssistant, allAssistantCollapsed,         
+      614        toggleDark, loadSessions, selectSession,                
+           debounceSearch,                                               
+      615        loadMoreMessages, isCollapsible, toggleCollapse,        
+           collapseIcon,                                                 
+      616        collapseSummary, messageClass, roleColor,               
+           sourceBadgeClass,                                             
+      617        sourceLabel, renderMarkdown, formatDate, formatTime,    
+           shortPath,                                                    
+      618 +      setMsgRef, canJump, jumpToNext, jumpToPrev,             
+          +isLongContent,                                                
+      619 +      toggleContentCollapse, toggleAllAssistant,              
+      620      };                                                        
+      621    }                                                           
+      622  }).mount('#app');                                             
+
+⏺ Now let me run all tests to make sure everything is solid:
+
+⏺ Bash(python -m pytest tests/ -v 2>&1)
+  ⎿ ============================= test session starts =====================
+    =========
+    platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.5.0 -- /opt/an
+    … +138 lines (ctrl+o to expand)
+
+
+
+⏺ All 63 tests pass. Let me mark the frontend task as complete:
+
+⏺ ★ Insight ─────────────────────────────────────
+  Navigation pattern for chat UIs: The message navigation uses an index-based
+  approach — we build arrays of indices for user and assistant messages, then
+  track a cursor position for each role. jumpToNext/jumpToPrev move the cursor
+  and scroll the target element into view with a brief blue ring highlight. This
+   is much more efficient than a "conversation turns" approach that would need
+  to group messages into turn bundles.
+
+  Auto-collapsing long content: Long assistant responses (>800 chars)
+  auto-collapse on session load using a CSS max-height + gradient fade. This
+  prevents the entire screen being dominated by a single long response while
+  keeping the content accessible with one click. The gradient color changes
+  based on the message background (blue for user, white for assistant) via CSS
+  custom properties.
+  ─────────────────────────────────────────────────
+
+  Here's a summary of all changes made:
+
+  Changes Summary
+
+  Backend Fixes
+
+  OpenCode v1.0 (Task #10) — src/aichat_history/backends/opencode.py
+  - Replaced misleading [mode: plan, finish: tool-calls] metadata display with a
+   clear italicized notice: "Content not available — this session uses an older 
+  OpenCode storage format (v1.0) that did not save message text to disk."
+  - Added fallback notice for user messages without summary data too
+
+  Claude Code (Task #11) — src/aichat_history/backends/claude_code.py
+  - Added "summary" and "queue-operation" to the skip list (internal bookkeeping
+   entries)
+  - Added image block handling in tool_result content arrays — shows [Image]
+  placeholder instead of dumping base64 data
+
+  Frontend (Task #12) — src/aichat_history/static/index.html
+
+  - Message navigation bar: Sticky nav with prev/next buttons for both User and
+  Agent messages, with turn count summary
+  - Jump-to-message: Smooth scrolling + blue ring flash highlight on target
+  - Collapsible assistant responses: Long assistant messages (>800 chars)
+  auto-collapse with gradient fade, "Show full"/"Collapse" toggle
+  - Expand/Collapse All button: Quick toggle for all long assistant responses at
+   once
+
+  Tests
+
+  - Updated test for OpenCode v1.0 assistant notice (was checking for metadata,
+  now checks for "not available" + "v1.0")
+  - Added test_summary_and_queue_entries_skipped — verifies internal entries are
+   filtered
+  - Added test_tool_result_with_image_block — verifies [Image] placeholder and
+  no base64 leak
+  - Updated message count from 10 → 11 (new tool_result fixture line)
+  - 63 tests passing (was 61)
+
+✻ Baked for 7m 51s
+
+❯ Update readme with better copy which sould be nice and simple give max 2  
+  ways to instal remove the pipx config.  To now make it live also do last  
+  bit ui/ux changes. SOmetimes message count is inccorect verify that too.  
+  If we can add better subtle animations for better ux that would be good   
+  but simple and consistent everywhere on every interaction.                
+
+⏺ Let me start by reading the current README and understanding the codebase
+  state.
+
+⏺ Read 2 files (ctrl+o to expand)
+
+⏺ Starting with the README:
+
+⏺ Write(README.md)
+  ⎿  Added 22 lines, removed 54 lines
+       1  # aichat-history                                               
+       2                                                                 
+       3 -Browse                                                         
+         -AI coding chat history from **Cursor**, **Claude Code**, and   
+         -**OpenCode** in one unified interface.                         
+       3 +A local web app to browse your                                 
+         +AI coding chat history from **Cursor**, **Claude Code**, and   
+         +**OpenCode** -- all in one place.                              
+       4                                                                 
+       5 -<!-- TODO: Add screenshot -->                                  
+       5 +Read-only. Fully local. No data leaves your machine.           
+       6                                                                 
+       7 -## Why this tool?                                              
+       8 -                                                               
+       9 -Every AI-powered coding IDE stores conversations differently   
+         --- Cursor uses SQLite databases, Claude Code uses JSONL files, 
+         - OpenCode uses a nested JSON hierarchy. There's no unified way 
+         - to search, browse, or export your chat history across these   
+         -tools.                                                         
+      10 -                                                               
+      11 -**aichat-history** gives you a single local web app to browse  
+         -all of them. It's read-only, runs entirely on your machine,    
+         -and sends no data anywhere.                                    
+      12 -                                                               
+       7  ## Install                                                     
+       8                                                                 
+       9  ```bash                                                        
+     ...
+      22  uv pip install aichat-history                                  
+      23  ```                                                            
+      24                                                                 
+      25 -Or with [pipx](https://github.com/pypa/pipx):                  
+      26 -                                                               
+      27 -```bash                                                        
+      28 -pipx install aichat-history                                    
+      29 -```                                                            
+      30 -                                                               
+      25  ## Usage                                                       
+      26                                                                 
+      27  ```bash                                                        
+      28  aichat-history serve                                           
+      29  ```                                                            
+      30                                                                 
+      31 -Then open [http://localhost:8080](http://localhost:8080) in    
+         -your browser.                                                  
+      31 +Open [localhost:8080](http://localhost:8080) and browse your   
+         +conversations.                                                 
+      32                                                                 
+      33 -### Options                                                    
+      34 -                                                               
+      33 +```bash                                                        
+      34 +aichat-history serve --port 3000        # custom port          
+      35 +aichat-history serve --host 0.0.0.0     # expose on network    
+      36  ```                                                            
+      37 -aichat-history serve --port 8081     # custom port             
+      38 -aichat-history serve --host 0.0.0.0  # bind to all interfaces  
+      39 -```                                                            
+      37                                                                 
+      38 -## What it reads                                               
+      38 +## Supported IDEs                                              
+      39                                                                 
+      40 -| IDE | Storage format | Default location (macOS) |            
+      41 -|-----|---------------|--------------------------|             
+      42 -| **Cursor** | SQLite (`state.vscdb`)                          
+         -| `~/Library/Application Support/Cursor/User/workspaceStorage/`
+         - |                                                             
+      43 -| **Claude Code** | JSONL + JSON index                         
+         -| `~/.claude/projects/` |                                      
+      44 -| **OpenCode** | JSON file hierarchy                           
+         -| `~/.local/share/opencode/storage/` |                         
+      40 +| IDE | Format | Default path (macOS) |                        
+      41 +|-----|--------|----------------------|                        
+      42 +| Cursor | SQLite                                              
+         +| `~/Library/Application Support/Cursor/User/workspaceStorage/`
+         + |                                                             
+      43 +| Claude Code | JSONL | `~/.claude/projects/` |                
+      44 +| OpenCode | JSON | `~/.local/share/opencode/storage/` |       
+      45                                                                 
+      46 -All paths are auto-detected per platform (macOS, Linux,        
+         -Windows).                                                      
+      46 +Paths are auto-detected on macOS, Linux, and Windows. Override 
+         + with environment variables:                                   
+      47                                                                 
+      48 -## Configuration                                               
+      49 -                                                               
+      50 -Override storage paths via environment variables:              
+      51 -                                                               
+      48  ```bash                                                        
+      49 -export AICHAT_CURSOR_PATH=/custom/                             
+         -path/to/cursor/workspaceStorage                                
+      50 -export AICHAT_CLAUDE_PATH=/custom/path/to/claude/projects      
+      51 -export AICHAT_OPENCODE_PATH=/custom/path/to/opencode/storage   
+      49 +export AICHAT_CURSOR_PATH=/path/to/cursor/workspaceStorage     
+      50 +export AICHAT_CLAUDE_PATH=/path/to/claude/projects             
+      51 +export AICHAT_OPENCODE_PATH=/path/to/opencode/storage          
+      52  ```                                                            
+      53                                                                 
+      54  ## Features                                                    
+      55                                                                 
+      56 -- **Unified view** -- browse all IDE chat histories in one     
+         -place                                                          
+      57 -- **Search** -- full-text search across session titles and     
+         -project names                                                  
+      58 -- **Filter** -- by source (Cursor/Claude Code/OpenCode) and    
+         -project                                                        
+      59 -- **Sort** -- by date, message count, or project name          
+      60 -- **Export** -- download any session as Markdown or JSON       
+      61 -- **Dark mode** -- respects system preference, toggleable      
+      62 -- **Collapsible** -- tool calls and thinking blocks collapse   
+         -to one-line summaries                                          
+      63 -- **Syntax highlighting** -- code blocks with copy button      
+      64 -- **Read-only** -- never writes to IDE data files              
+      56 +- Search, filter, and sort across all your AI chat sessions    
+      57 +- Export any session as Markdown or JSON                       
+      58 +- Collapsible tool calls, thinking blocks, and long responses  
+      59 +- Message navigation to jump between user/agent turns          
+      60 +- Dark mode with system preference detection                   
+      61 +- Syntax-highlighted code blocks with copy button              
+      62                                                                 
+      63 -## Privacy                                                     
+      64 -                                                               
+      65 -- **100% local** -- runs entirely on your machine              
+      66 -- **No telemetry** -- no analytics, no tracking, no phone-home 
+      67 -- **Read-only** -- only reads existing chat data files, never  
+         -modifies them                                                  
+      68 -- **No network** -- the server only listens on localhost by    
+         -default                                                        
+      69 -                                                               
+      70 -## Contributing                                                
+      71 -                                                               
+      72 -See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup   
+         -and how to add new backends.                                   
+      73 -                                                               
+      63  ## License                                                     
+      64                                                                 
+      65  [MIT](LICENSE)                                                 
+
+⏺ Now let me investigate the message count issue. The problem is that
+  message_count in sessions-index.json (Claude Code) counts JSONL lines, but our
+   parser splits each line into multiple messages (text + tool_use + thinking =
+  3 messages from 1 line). Let me verify this across backends:
+
+⏺ Explore(Investigate message count mismatch)
+  ⎿  Done (8 tool uses · 52.1k tokens · 23s)
+
+⏺ ★ Insight ─────────────────────────────────────
+  Message count mismatch root cause: Claude Code's sessions-index.json stores
+  messageCount as raw JSONL line count, but our parser splits each line into
+  multiple messages (text + tool_use = 2 messages, thinking + text + tool_use =
+  3 messages from 1 line). Some lines are also skipped entirely (snapshots,
+  progress). So a session showing "8 msgs" in the sidebar might actually display
+   11+ messages. The cleanest fix: show the actual loaded count in the session
+  detail view, not the metadata estimate.
+  ─────────────────────────────────────────────────
+
+  The best approach: when messages are loaded, update the displayed count to
+  match reality. The sidebar metadata count is just an estimate (it's what the
+  IDE itself stored). The session detail header should show the actual count.
+  Let me now tackle the message count fix and animations together in the
+  frontend rewrite:
+
+⏺ Now let me do a comprehensive rewrite of the frontend with animations, message
+   count fix, and final polish. Let me re-read the current state:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Now I'll make a comprehensive set of edits for animations, message count fix,
+  and final polish. Let me do this systematically:
+
+  1. Add animation keyframes and styles:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 28 lines
+      19    <style>                                                      
+      20      [v-cloak] { display: none; }                               
+      21                                                                 
+      22 +    /* ── Animations ───────────────────────────────── */      
+      23 +    @keyframes fadeSlideUp {                                   
+      24 +      from { opacity: 0; transform: translateY(6px); }         
+      25 +      to { opacity: 1; transform: translateY(0); }             
+      26 +    }                                                          
+      27 +    @keyframes pulseRing {                                     
+      28 +      0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.5); }         
+      29 +      70% { box-shadow: 0 0 0 4px rgba(59,130,246,0); }        
+      30 +      100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }         
+      31 +    }                                                          
+      32 +    @keyframes fadeIn {                                        
+      33 +      from { opacity: 0; }                                     
+      34 +      to { opacity: 1; }                                       
+      35 +    }                                                          
+      36 +                                                               
+      37 +    /* Message entrance animation */                           
+      38 +    .msg-animate {                                             
+      39 +      animation: fadeSlideUp 0.25s ease-out both;              
+      40 +    }                                                          
+      41 +                                                               
+      42 +    /* Pulse ring for nav-jump target */                       
+      43 +    .msg-pulse {                                               
+      44 +      animation: pulseRing 0.8s ease-out;                      
+      45 +    }                                                          
+      46 +                                                               
+      47 +    /* Global transition base — keep subtle */                 
+      48 +    * { -webkit-tap-highlight-color: transparent; }            
+      49 +                                                               
+      50      /* Markdown content styles */                              
+      51      .msg-content pre { margin: 0.5rem 0; border-radius:        
+          0.375rem; overflow-x: auto; position: relative; }              
+      52      .msg-content pre code { display: block; padding: 1rem;     
+          font-size: 0.85rem; line-height: 1.5; }                        
+
+⏺ 2. Upgrade copy button + collapsible + session item styles:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 25 lines, removed 5 lines
+       77        padding: 0.2rem 0.5rem; font-size: 0.7rem;              
+       78        background: rgba(255,255,255,0.15); border: 1px solid   
+           rgba(255,255,255,0.2);                                        
+       79        border-radius: 0.25rem; cursor: pointer; color:         
+           #9ca3af;                                                      
+       80 -      opacity: 0; transition: opacity 0.15s;                  
+       80 +      opacity: 0; transition: all 0.2s ease;                  
+       81      }                                                         
+       82      .code-wrapper:hover .copy-btn { opacity: 1; }             
+       83 -    .copy-btn:hover { background: rgba(255,255,255,0.25);     
+          -color: #e5e7eb; }                                             
+       84 -    .copy-btn.copied { color: #34d399; }                      
+       83 +    .copy-btn:hover { background: rgba(255,255,255,0.25);     
+          +color: #e5e7eb; transform: scale(1.05); }                     
+       84 +    .copy-btn:active { transform: scale(0.95); }              
+       85 +    .copy-btn.copied { color: #34d399; border-color: #34d399; 
+          + }                                                            
+       86                                                                
+       87      /* Collapsible */                                         
+       88 -    .collapsible-header { cursor: pointer; user-select: none; 
+          -}                                                             
+       89 -    .collapsible-header:hover { opacity: 0.8; }               
+       88 +    .collapsible-header { cursor: pointer; user-select: none; 
+          +transition: opacity 0.15s ease; }                             
+       89 +    .collapsible-header:hover { opacity: 0.75; }              
+       90 +    .collapsible-body { overflow: hidden; transition:         
+          +max-height 0.3s ease; }                                       
+       91                                                                
+       92 +    /* Session list items */                                  
+       93 +    .session-item {                                           
+       94 +      transition: all 0.15s ease;                             
+       95 +      border-left: 2px solid transparent;                     
+       96 +    }                                                         
+       97 +    .session-item:hover { transform: translateX(2px); }       
+       98 +    .session-item:active { transform: translateX(1px); }      
+       99 +    .session-item.selected {                                  
+      100 +      border-left-color: #3b82f6;                             
+      101 +      background: rgb(239 246 255);                           
+      102 +    }                                                         
+      103 +    .dark .session-item.selected { background:                
+          +rgba(30,58,138,0.2); }                                        
+      104 +                                                              
+      105 +    /* Buttons with press effect */                           
+      106 +    .btn-interact { transition: all 0.15s ease; }             
+      107 +    .btn-interact:hover { transform: translateY(-1px); }      
+      108 +    .btn-interact:active { transform: translateY(0)           
+          +scale(0.98); }                                                
+      109 +                                                              
+      110      /* Message navigation bar */                              
+      111      .msg-nav {                                                
+      112        position: sticky; top: 0; z-index: 10;                  
+
+⏺ 3. Upgrade nav bar button styles:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 6 lines, removed 2 lines
+      116      .msg-nav-btn {                                            
+      117        padding: 0.25rem 0.5rem; border-radius: 0.375rem;       
+      118        font-size: 0.75rem; font-weight: 500;                   
+      119 -      transition: all 0.15s; cursor: pointer;                 
+      119 +      transition: all 0.2s ease; cursor: pointer;             
+      120        border: 1px solid transparent;                          
+      121      }                                                         
+      122 -    .msg-nav-btn:hover:not(:disabled) { background:           
+          -rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.3); }   
+      122 +    .msg-nav-btn:hover:not(:disabled) {                       
+      123 +      background: rgba(59,130,246,0.1); border-color:         
+          +rgba(59,130,246,0.3);                                         
+      124 +      transform: translateY(-1px);                            
+      125 +    }                                                         
+      126 +    .msg-nav-btn:active:not(:disabled) { transform:           
+          +translateY(0) scale(0.97); }                                  
+      127      .msg-nav-btn:disabled { opacity: 0.3; cursor: default; }  
+      128      .msg-nav-btn.active { background: rgba(59,130,246,0.15);  
+           border-color: rgba(59,130,246,0.4); color: #3b82f6; }         
+      129                                                                
+
+⏺ 4. Update the session list item HTML to use animation classes:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 3 lines, removed 2 lines
+      226              <p>No sessions match your filters.</p>            
+      227            </template>                                         
+      228          </div>                                                
+      229 -        <button v-for="s in sessions" :key="s.id"             
+      229 +        <button v-for="(s, sIdx) in sessions" :key="s.id"     
+      230            @click="selectSession(s)"                           
+      231 -          :class="['                                          
+          -w-full text-left px-3 py-2.5 border-b border-gray-100         
+          -dark:border-gray-700/50 hover:bg-gray-100                     
+          -dark:hover:bg-gray-700/50 transition-colors                   
+          -', selectedSession?.id === s.id ? '                           
+          -bg-blue-50 dark:bg-blue-900/20 border-l-2 border-l-blue-500   
+          -' : '']">                                                     
+      231 +          :class="['session-item                              
+          +w-full text-left px-3 py-2.5 border-b border-gray-100         
+          +dark:border-gray-700/50 hover:bg-gray-100                     
+          +dark:hover:bg-gray-700/50', selectedSession?.id === s.id ? '  
+          +selected' : '']"                                              
+      232 +          :style="{ animationDelay: Math.min(sIdx * 20, 400)  
+          ++ 'ms' }">                                                    
+      233            <div class="flex items-center gap-1.5 mb-0.5">      
+      234              <span :class="sourceBadgeClass(s.source)"         
+           class="text-[10px] px-1.5 py-0.5 rounded font-medium          
+           uppercase tracking-wide">{{ sourceLabel(s.source) }}</span>   
+      235              <span class="text-xs text-gray-400 ml-auto">{{    
+           s.message_count }} msgs</span>                                
+
+⏺ 5. Fix the message count in session header — show actual loaded count:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 1 line, removed 1 line
+      261                <svg class="w-3 h-3" fill="none"                
+           stroke="currentColor" viewBox="0 0 24 24"><path               
+           stroke-linecap="round" stroke-linejoin="round"                
+           stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0        
+           002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>  
+      262                {{ formatDate(selectedSession.created) }}       
+      263              </span>                                           
+      264 -            <span>{{                                          
+          -selectedSession.message_count }} messages</span>              
+      264 +            <span>{{ messages.length ||                       
+          +selectedSession.message_count }} messages</span>              
+      265            </div>                                              
+      266            <div class="mt-2 flex gap-2">                       
+      267              <a :href="'/api/export/' +                        
+           encodeURIComponent(selectedSession.id) + '?format=md'"        
+
+⏺ 6. Add animation classes to message cards + export buttons:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 2 lines, removed 2 lines
+      265            </div>                                              
+      266            <div class="mt-2 flex gap-2">                       
+      267              <a :href="'/api/export/' +                        
+           encodeURIComponent(selectedSession.id) + '?format=md'"        
+      268 -              class="                                         
+          -inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded    
+          -border border-gray-300 dark:border-gray-600 hover:bg-gray-100 
+          -dark:hover:bg-gray-700 transition-colors">                    
+      268 +              class="btn-interact                             
+          +inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded    
+          +border border-gray-300 dark:border-gray-600 hover:bg-gray-100 
+          +dark:hover:bg-gray-700">                                      
+      269                <svg class="w-3 h-3" fill="none"                
+           stroke="currentColor" viewBox="0 0 24 24"><path               
+           stroke-linecap="round" stroke-linejoin="round"                
+           stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0     
+           01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 
+            01.293.707V19a2 2 0 01-2 2z"/></svg>                         
+      270                Export MD                                       
+      271              </a>                                              
+      272              <a :href="'/api/export/' +                        
+           encodeURIComponent(selectedSession.id) + '?format=json'"      
+      273 -              class="                                         
+          -inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded    
+          -border border-gray-300 dark:border-gray-600 hover:bg-gray-100 
+          -dark:hover:bg-gray-700 transition-colors">                    
+      273 +              class="btn-interact                             
+          +inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded    
+          +border border-gray-300 dark:border-gray-600 hover:bg-gray-100 
+          +dark:hover:bg-gray-700">                                      
+      274                <svg class="w-3 h-3" fill="none"                
+           stroke="currentColor" viewBox="0 0 24 24"><path               
+           stroke-linecap="round" stroke-linejoin="round"                
+           stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0     
+           01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 
+            01.293.707V19a2 2 0 01-2 2z"/></svg>                         
+      275                Export JSON                                     
+      276              </a>                                              
+
+⏺ 7. Add animation to message cards (staggered fade-in):
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 2 lines, removed 1 line
+      314            <template v-else>                                   
+      315              <div v-for="(msg, idx) in displayedMessages"      
+           :key="idx"                                                    
+      316                :ref="el => setMsgRef(el, idx)"                 
+      317 -              :class="messageClass(msg)">                     
+      317 +              :class="[messageClass(msg), 'msg-animate']"     
+      318 +              :style="{ animationDelay: Math.min(idx * 30,    
+          +600) + 'ms' }">                                               
+      319                <!-- Collapsible: tool, thinking, diff -->      
+      320                <template v-if="isCollapsible(msg)">            
+      321                  <div class="collapsible-header flex           
+           items-center gap-2 text-sm" @click="toggleCollapse(idx)">     
+
+⏺ 8. Upgrade the "Load more" button and collapse toggle buttons with animation 
+  classes:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 2 lines, removed 2 lines
+      346                  </button>                                     
+      347                </template>                                     
+      348              </div>                                            
+      349 -            <div v-if="messages.length >                      
+          -displayedMessages.length" class="text-center py-4">           
+      349 +            <div v-if="messages.length >                      
+          +displayedMessages.length" class="text-center py-4 msg-animate"
+          + style="animation-delay: 0.4s">                               
+      350                <button @click="loadMoreMessages"               
+      351 -                class="                                       
+          -text-sm px-5 py-2 rounded-lg bg-blue-500 text-white           
+          -hover:bg-blue-600 transition-colors shadow-sm">               
+      351 +                class="btn-interact                           
+          +text-sm px-5 py-2 rounded-lg bg-blue-500 text-white           
+          +hover:bg-blue-600 shadow-sm">                                 
+      352                  Load more ({{ messages.length -               
+           displayedMessages.length }} remaining)                        
+      353                </button>                                       
+      354              </div>                                            
+
+⏺ 9. Upgrade the "Show full response" button:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 1 line, removed 1 line
+      341                    v-html="renderMarkdown(msg.content)"></div> 
+      342                  <button v-if="contentCollapsed[idx]"          
+      343                    @click="toggleContentCollapse(idx)"         
+      344 -                  class="                                     
+          -mt-2 text-xs text-blue-500 hover:text-blue-600                
+          -dark:text-blue-400 font-medium">                              
+      344 +                  class="btn-interact                         
+          +mt-2 text-xs text-blue-500 hover:text-blue-600                
+          +dark:text-blue-400 font-medium">                              
+      345                    Show full response                          
+      346                  </button>                                     
+      347                </template>                                     
+
+⏺ 10. Upgrade the dark mode toggle button with animation:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 1 line, removed 1 line
+      167      </div>                                                    
+      168      <div class="flex items-center gap-2">                     
+      169        <span v-if="sessions.length" class="text-xs             
+           text-gray-400">{{ sessions.length }} sessions</span>          
+      170 -      <button @click="toggleDark" class="                     
+          -p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-sm
+          - transition-colors                                            
+          -" :title="dark ? 'Light mode' : 'Dark mode'">                 
+      170 +      <button @click="toggleDark" class="btn-interact         
+          +p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-sm
+          +" :title="dark ? 'Light mode' : 'Dark mode'">                 
+      171          <template v-if="dark"><svg class="w-4 h-4"            
+           fill="none" stroke="currentColor" viewBox="0 0 24 24"><path   
+           stroke-linecap="round" stroke-linejoin="round"                
+           stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364       
+           6.364l-.707-.707M6.343 6.343l-.707-.707m12.728                
+           0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0   
+           018 0z"/></svg></template>                                    
+      172          <template v-else><svg class="w-4 h-4" fill="none"     
+           stroke="currentColor" viewBox="0 0 24 24"><path               
+           stroke-linecap="round" stroke-linejoin="round"                
+           stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003  
+           9.003 0 0012 21a9.003 9.003 0                                 
+           008.354-5.646z"/></svg></template>                            
+      173        </button>                                               
+
+⏺ 11. Upgrade the collapsible chevron transition + collapse toggle button:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 1 line, removed 1 line
+      321                  <div class="collapsible-header flex           
+           items-center gap-2 text-sm" @click="toggleCollapse(idx)">     
+      322                    <span>{{ collapseIcon(msg) }}</span>        
+      323                    <span class="font-medium truncate">{{       
+           collapseSummary(msg) }}</span>                                
+      324 -                  <svg :class="['w-3 h-3 ml-auto text-gray-400
+          - transition-transform flex-shrink-0                           
+          -', collapsed[idx] ? '' : 'rotate-90']" fill="none"            
+          -stroke="currentColor" viewBox="0 0 24 24"><path               
+          -stroke-linecap="round" stroke-linejoin="round"                
+          -stroke-width="2" d="M9 5l7 7-7 7"/></svg>                     
+      324 +                  <svg :class="['w-3 h-3 ml-auto text-gray-400
+          + flex-shrink-0 transition-transform duration-200              
+          +', collapsed[idx] ? '' : 'rotate-90']" fill="none"            
+          +stroke="currentColor" viewBox="0 0 24 24"><path               
+          +stroke-linecap="round" stroke-linejoin="round"                
+          +stroke-width="2" d="M9 5l7 7-7 7"/></svg>                     
+      325                  </div>                                        
+      326                  <div v-show="!collapsed[idx]" class="mt-2     
+           msg-content text-sm"                                          
+           v-html="renderMarkdown(msg.content)"></div>                   
+      327                </template>                                     
+
+⏺ 12. Upgrade the content collapse toggle button in the message header:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 1 line, removed 1 line
+      333                    <!-- Collapse toggle for long assistant     
+           messages -->                                                  
+      334                    <button v-if="msg.role === 'assistant' &&   
+           isLongContent(msg.content)"                                   
+      335                      @click="toggleContentCollapse(idx)"       
+      336 -                    class="                                   
+          -ml-auto text-[11px] px-2 py-0.5 rounded border border-gray-200
+          - dark:border-gray-600 text-gray-500 hover:bg-gray-100         
+          -dark:hover:bg-gray-700 transition-colors">                    
+      336 +                    class="btn-interact                       
+          +ml-auto text-[11px] px-2 py-0.5 rounded border border-gray-200
+          + dark:border-gray-600 text-gray-500 hover:bg-gray-100         
+          +dark:hover:bg-gray-700">                                      
+      337                      {{ contentCollapsed[idx] ? 'Show full' :  
+           'Collapse' }}                                                 
+      338                    </button>                                   
+      339                  </div>                                        
+
+⏺ 13. Now update the scroll-to-message to use the CSS pulse animation instead of
+   inline style:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 5 lines, removed 4 lines
+      510        const el = msgRefs.value[idx];                          
+      511        if (el) {                                               
+      512          el.scrollIntoView({ behavior: 'smooth', block:        
+           'start' });                                                   
+      513 -        // Flash highlight                                    
+      514 -        el.style.transition = 'box-shadow 0.3s';              
+      515 -        el.style.boxShadow = '0 0 0 2px                       
+          -rgba(59,130,246,0.5)';                                        
+      516 -        setTimeout(() => { el.style.boxShadow = ''; }, 1200); 
+      513 +        // Pulse highlight animation                          
+      514 +        el.classList.remove('msg-pulse');                     
+      515 +        void el.offsetWidth; // trigger reflow to restart     
+          +animation                                                     
+      516 +        el.classList.add('msg-pulse');                        
+      517 +        el.addEventListener('animationend', () =>             
+          +el.classList.remove('msg-pulse'), { once: true });            
+      518        }                                                       
+      519      }                                                         
+      520                                                                
+
+⏺ 14. Add smooth transition to content collapse (instead of just max-height 
+  CSS):
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 4 lines, removed 1 line
+      128      .msg-nav-btn.active { background: rgba(59,130,246,0.15);  
+           border-color: rgba(59,130,246,0.4); color: #3b82f6; }         
+      129                                                                
+      130      /* Long content collapse */                               
+      131 -    .content-collapsed { max-height: 300px; overflow: hidden; 
+          - position: relative; }                                        
+      131 +    .content-collapsed {                                      
+      132 +      max-height: 300px; overflow: hidden; position:          
+          +relative;                                                     
+      133 +      transition: max-height 0.3s ease;                       
+      134 +    }                                                         
+      135      .content-collapsed::after {                               
+      136        content: ''; position: absolute; bottom: 0; left: 0;    
+           right: 0;                                                     
+      137        height: 60px;                                           
+
+⏺ 15. Add smooth transition to the search input focus state and source tab 
+  underline:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 1 line, removed 1 line
+      194          <div class="relative">                                
+      195            <svg class="absolute left-2.5 top-2 w-3.5 h-3.5     
+           text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 
+            24 24"><path stroke-linecap="round" stroke-linejoin="round"  
+           stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114  
+           0z"/></svg>                                                   
+      196            <input v-model="searchQuery"                        
+           @input="debounceSearch" type="text" placeholder="Search       
+           sessions..."                                                  
+      197 -            class="w-full pl-8 pr-3 py-1.5 text-sm rounded    
+          -border border-gray-300 dark:border-gray-600 bg-white          
+          -dark:bg-gray-700 focus:outline-none focus:ring-1              
+          - focus:ring-blue-500" />                                      
+      197 +            class="w-full pl-8 pr-3 py-1.5 text-sm rounded    
+          +border border-gray-300 dark:border-gray-600 bg-white          
+          +dark:bg-gray-700 focus:outline-none focus:ring-2              
+          + focus:ring-blue-500                                          
+          +/40 focus:border-blue-400 transition-all duration-200" />     
+      198          </div>                                                
+      199        </div>                                                  
+      200                                                                
+
+⏺ 16. Add transition to source tab underline:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 1 line, removed 1 line
+      184        <div class="flex border-b border-gray-200               
+           dark:border-gray-700 text-sm">                                
+      185          <button v-for="tab in sourceTabs" :key="tab.value"    
+      186            @click="sourceFilter = tab.value; loadSessions()"   
+      187 -          :class="['flex-1 py-2 px-1 text-center              
+          -transition-colors whitespace-nowrap text-xs sm:text-sm        
+          -', sourceFilter === tab.value ? 'border-b-2 border-blue-500   
+          -text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-500
+          - hover:text-gray-700 dark:hover:text-gray-400']">             
+      187 +          :class="['flex-1 py-2 px-1 text-center              
+          +whitespace-nowrap text-xs sm:text-sm                          
+          + transition-all duration-200                                  
+          +', sourceFilter === tab.value ? 'border-b-2 border-blue-500   
+          +text-blue-600 dark:text-blue-400 font-medium' : 'text-gray-500
+          + hover:text-gray-700 dark:hover:text-gray-400                 
+          + hover:bg-gray-100 dark:hover:bg-gray-700/50']">              
+      188            {{ tab.label }}                                     
+      189          </button>                                             
+      190        </div>                                                  
+
+⏺ 17. Add a smooth empty state entrance:
+
+⏺ Update(src/aichat_history/static/index.html)
+  ⎿  Added 1 line, removed 1 line
+      360        </template>                                             
+      361                                                                
+      362        <!-- Empty state -->                                    
+      363 -      <div v-else class="flex-1 flex flex-col items-center    
+          -justify-center text-gray-400 gap-3">                          
+      363 +      <div v-else class="flex-1 flex flex-col items-center    
+          +justify-center text-gray-400 gap-3 msg-animate">              
+      364          <svg class="w-16 h-16 text-gray-200                   
+           dark:text-gray-700" fill="none" stroke="currentColor"         
+           viewBox="0 0 24 24"><path stroke-linecap="round"              
+           stroke-linejoin="round" stroke-width="1" d="M8 12h.01M12      
+           12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0       
+           01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3         
+           12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>                   
+      365          <p class="text-sm">Select a session to view chat      
+           history</p>                                                   
+      366          <p class="text-xs text-gray-300                       
+           dark:text-gray-600">Browse conversations from Cursor, Claude  
+           Code, or OpenCode</p>                                         
+
+⏺ Now let me run all tests to make sure everything is solid:
+
+⏺ Bash(python -m pytest tests/ -v 2>&1)
+  ⎿ ============================= test session starts =====================
+    =========
+    platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.5.0 -- /opt/an
+    … +138 lines (ctrl+o to expand)
+
+
+
+⏺ All 63 tests pass. Let me update the task statuses and now commit and push:
+
+⏺ Let me do a final verification — check the HTML is well-formed by reading it:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Good. Now let me commit and push everything:
+
+⏺ Bash(git status)
+  ⎿  On branch main
+     Your branch is up to date with 'origin/main'.
+     … +12 lines (ctrl+o to expand)
+
+⏺ Bash(git diff --stat)
+  ⎿   README.md                                  |  76 +++-----
+      src/aichat_history/backends/claude_code.py |  20 ++-
+      src/aichat_history/backends/opencode.py    |  20 +--
+     … +6 lines (ctrl+o to expand)
+
+⏺ Bash(git log --oneline -5)
+  ⎿  72065a6 fix: opencode empty messages + claude code limited history
+     95056c5 docs: readme, license, contributing
+     b8a0736 feat: polished frontend with search, filter, export
+     … +2 lines (ctrl+o to expand)
+
+⏺ Bash(git add README.md src/aichat_history/backends/claude_code.py
+      src/aichat_history/backends/opencode.py
+      src/aichat_history/static/index.html tests/conftest.py test…)
+  ⎿  [main 83a857b] polish: v1 ui/ux, animations, message count fix, readme
+     cleanup
+      7 files changed, 363 insertions(+), 96 deletions(-)
+
+⏺ Bash(git push origin main)
+  ⎿  To github.com:sfs016/aichat-history.git
+        72065a6..83a857b  main -> main
+
+⏺ ★ Insight ─────────────────────────────────────
+  Animation design philosophy: The animations follow three principles: (1)
+  Subtle — max 6px translateY, 200-250ms duration, ease-out timing; (2)
+  Consistent — the same btn-interact class on every clickable element provides
+  uniform hover-lift + press-scale; (3) Purposeful — fade-in on messages gives a
+   sense of content loading, pulse-ring on nav-jump draws the eye to the target,
+   and the staggered delay on session items creates a cascade effect without
+  being distracting. CSS @keyframes are preferred over JS-driven animations for
+  GPU acceleration.
+
+  Message count strategy: Rather than trying to make every backend's
+  message_count accurate (which would require parsing every session's full
+  content), the frontend shows messages.length || selectedSession.message_count
+  — the actual count when messages are loaded, falling back to the metadata
+  estimate in the sidebar. This keeps the sidebar fast (no need to parse all
+  sessions) while showing truth in the detail view.
+  ─────────────────────────────────────────────────
+
+  Done. Here's everything that shipped:
+  Change: README
+  Details: Cleaner copy, 2 install methods (pip + uv), removed pipx
+  ────────────────────────────────────────
+  Change: OpenCode v1.0
+  Details: Clear "content unavailable" notice instead of [mode: plan, finish: 
+    tool-calls]
+  ────────────────────────────────────────
+  Change: Claude Code
+  Details: Skips summary/queue-operation entries, shows [Image] for base64
+  blocks
+  ────────────────────────────────────────
+  Change: Message count
+  Details: Session detail header shows actual loaded count, not metadata
+  estimate
+  ────────────────────────────────────────
+  Change: Animations
+  Details: Fade-slide-up on messages (staggered), pulse-ring on nav-jump,
+    hover-lift on all buttons/sessions, smooth transitions on
+    collapse/expand/tabs/search focus
+  ────────────────────────────────────────
+  Change: Tests
+  Details: 63 passing (3 new tests added)
+  Pushed to main as commit 83a857b.
+
+✻ Sautéed for 4m 39s
+
+❯ Nice the animations work well. Make sure our Readme is polished and has a 
+   section of how to contribute, try using a graphic for readme to make it  
+  appealing. and push with commit message v1                                
+
+⏺ Read 2 files (ctrl+o to expand)
+
+⏺ Now let me create an SVG banner graphic and write the polished README:
+
+⏺ Write(banner.svg)
+  ⎿  Wrote 51 lines to banner.svg
+     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200">
+       <defs>
+         <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+           <stop offset="0%" style="stop-color:#0f172a"/>
+           <stop offset="100%" style="stop-color:#1e293b"/>
+         </linearGradient>
+         <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="0%">
+           <stop offset="0%" style="stop-color:#3b82f6"/>
+           <stop offset="50%" style="stop-color:#8b5cf6"/>
+           <stop offset="100%" style="stop-color:#06b6d4"/>
+     … +41 lines (ctrl+o to expand)
+
+⏺ Write(README.md)
+  ⎿  Added 51 lines, removed 20 lines
+       1 -# aichat-history                                               
+       1 +<p align="center">                                             
+       2 +  <img src="banner.svg" alt="aichat-history" width="700" />    
+       3 +</p>                                                           
+       4                                                                 
+       5 -A local web app to browse your AI coding chat history from     
+         -**Cursor**, **Claude Code**, and **OpenCode** -- all in one    
+         -place.                                                         
+       5 +<p align="center">                                             
+       6 +  <strong>Browse your AI coding chat history from Cursor,      
+         +Claude Code, and OpenCode in one place.</strong><br/>          
+       7 +  <sub>Read-only. Fully local. No data leaves your             
+         +machine.</sub>                                                 
+       8 +</p>                                                           
+       9                                                                 
+      10 -Read-only. Fully local. No data leaves your machine. Simple    
+         -but effective UI/UX to quickly scroll through your chat        
+         -history, filter or even search.                                
+      10 +<p align="center">                                             
+      11 +  <a                                                           
+         +href="#install">Install</a>&nbsp;&nbsp;&bull;&nbsp;&nbsp;<a    
+         +href="#usage">Usage</a>&nbsp;&nbsp;&bull;&nbsp;&nbsp;<a        
+         +href="#features">Features</a>&nbsp;&nbsp;&bull;&nbsp;&nbsp;<a  
+         +href="#contributing">Contributing</a>                          
+      12 +</p>                                                           
+      13                                                                 
+      14 +---                                                            
+      15 +                                                               
+      16  ## Install                                                     
+      17                                                                 
+      18  ```bash                                                        
+     ...
+      22  aichat-history serve                                           
+      23  ```                                                            
+      24                                                                 
+      25 -Open [localhost:8080](http://localhost:8080) and browse        
+         -your conversations.                                            
+      25 +Open [localhost:8080](http://localhost:8080) and start browsing
+         +.                                                              
+      26                                                                 
+      27 -```bash                                                        
+      28 -aichat-history serve --port 3000        # custom port          
+      29 -aichat-history serve --host 0.0.0.0     # expose on network    
+      30 -```                                                            
+      27 +| Option | Example |                                           
+      28 +|--------|---------|                                           
+      29 +| Custom port | `aichat-history serve --port 3000` |           
+      30 +| Expose on network | `aichat-history serve --host 0.0.0.0` |  
+      31                                                                 
+      32  ## Supported IDEs                                              
+      33                                                                 
+      34 -| IDE | Format | Default path (macOS) |                        
+      35 -|-----|--------|----------------------|                        
+      36 -| Cursor | SQLite | `~/Library/Application                     
+         -Support/Cursor/User/workspaceStorage/` |                       
+      37 -| Claude Code | JSONL | `~/.claude/projects/` |                
+      38 -| OpenCode | JSON | `~/.local/share/opencode/storage/` |       
+      34 +| IDE | Storage | Default path (macOS) |                       
+      35 +|-----|---------|----------------------|                       
+      36 +| **Cursor** | SQLite | `~/Library/Application                 
+         +Support/Cursor/User/workspaceStorage/` |                       
+      37 +| **Claude Code** | JSONL | `~/.claude/projects/` |            
+      38 +| **OpenCode** | JSON | `~/.local/share/opencode/storage/` |   
+      39                                                                 
+      40 -Paths are auto-detected on macOS, Linux, and Windows.          
+         - Override with environment variables:                          
+      40 +All paths are auto-detected on macOS, Linux, and Windows.      
+      41                                                                 
+      42 +<details>                                                      
+      43 +<summary>Override paths with environment variables</summary>   
+      44 +                                                               
+      45  ```bash                                                        
+      46  export AICHAT_CURSOR_PATH=/path/to/cursor/workspaceStorage     
+      47  export AICHAT_CLAUDE_PATH=/path/to/claude/projects             
+      48  export AICHAT_OPENCODE_PATH=/path/to/opencode/storage          
+      49  ```                                                            
+      50                                                                 
+      51 +</details>                                                     
+      52 +                                                               
+      53  ## Features                                                    
+      54                                                                 
+      55 -- Search, filter, and sort across all your AI chat sessions    
+      56 -- Export any session as Markdown or JSON                       
+      57 -- Collapsible tool calls, thinking blocks, and long responses  
+      58 -- Message navigation to jump between user/agent turns          
+      59 -- Dark mode with system preference detection                   
+      60 -- Syntax-highlighted code blocks with copy button              
+      55 +- **Search & filter** -- find sessions by title, project, or   
+         +source                                                         
+      56 +- **Sort** -- by message count, date, or project name          
+      57 +- **Export** -- download any session as Markdown or JSON       
+      58 +- **Message navigation** -- jump between user and agent        
+         +messages                                                       
+      59 +- **Collapsible** -- tool calls, thinking blocks, and long     
+         +responses collapse to summaries                                
+      60 +- **Dark mode** -- follows system preference, toggleable       
+      61 +- **Syntax highlighting** -- code blocks with one-click copy   
+      62 +- **Smooth animations** -- subtle transitions on every         
+         +interaction                                                    
+      63                                                                 
+      64 +## Contributing                                                
+      65 +                                                               
+      66 +Contributions are welcome! See                                 
+         +[CONTRIBUTING.md](CONTRIBUTING.md) for full details.           
+      67 +                                                               
+      68 +**Quick start:**                                               
+      69 +                                                               
+      70 +```bash                                                        
+      71 +git clone https://github.com/sfs016/aichat-history.git         
+      72 +cd aichat-history                                              
+      73 +pip install -e ".[dev]"                                        
+      74 +pytest                                                         
+      75 +```                                                            
+      76 +                                                               
+      77 +**Want to add support for another IDE?** Implement the         
+         +`ChatProvider` interface, register it in                       
+         +`backends/__init__.py`, and add tests with synthetic fixtures. 
+         + The [contributing guide](CONTRIBUTING.md) has a step-by-step  
+         +walkthrough.                                                   
+      78 +                                                               
+      79  ## License                                                     
+      80                                                                 
+      81  [MIT](LICENSE)                                                 
+
+⏺ Now commit and push:
+
+⏺ Bash(git add README.md banner.svg && git commit -m "v1…)
+  ⎿  [main 413a4d9] v1
+      2 files changed, 101 insertions(+), 20 deletions(-)
+      create mode 100644 banner.svg
+
+⏺ Bash(git push origin main)
+  ⎿  To github.com:sfs016/aichat-history.git
+        83a857b..413a4d9  main -> main
+
+⏺ Pushed as 413a4d9 with commit message v1.
+
+  The README now has:
+  - SVG banner graphic with the project name, chat bubble icon, gradient accent,
+   and IDE badges
+  - Centered hero section with tagline and nav links
+  - Clean install/usage sections (pip + uv only)
+  - Collapsible env var override section via <details>
+  - Features list with the full feature set
+  - Contributing section with quick-start and a pointer to the full guide
+  - MIT license footer
+
+✻ Crunched for 50s
